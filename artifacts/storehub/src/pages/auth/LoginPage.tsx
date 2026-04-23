@@ -1,18 +1,16 @@
 import { useState, type FormEvent } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "../../contexts/AuthContext";
-import { useApp } from "../../contexts/useApp";
 import { logIn, socialLogin } from "../../services/authService";
 import { authenticateWithBiometric, getBiometricEmail } from "../../services/biometricService";
 import { Eye, EyeOff, Mail, Lock, Smartphone, Fingerprint, AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
   const { setUser } = useAuth();
-  const { isOnboarded } = useApp();
   const [, navigate] = useLocation();
 
   function afterLogin(isNewUser: boolean) {
-    if (isNewUser || !isOnboarded) navigate("/onboarding");
+    if (isNewUser) navigate("/onboarding");
     else navigate("/dashboard");
   }
 

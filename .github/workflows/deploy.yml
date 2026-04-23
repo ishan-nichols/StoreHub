@@ -1,0 +1,48 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # allow manual trigger from GitHub UI
+
+jobs:
+  # ── Cloud deploy (SSH) ────────────────────────────────────────────────────────
+  # This job activates automatically once you add SSH_HOST, SSH_USER, and
+  # SSH_PRIVATE_KEY to your GitHub repository secrets (Settings → Secrets).
+  # Until then it is a no-op — the step is skipped if SSH_HOST is empty.
+  #
+  # How to activate for a cloud server (VPS / DigitalOcean / AWS EC2 / etc.):
+  #   1. Generate a deploy key on your server: ssh-keygen -t ed25519 -f ~/.ssh/storehub_deploy
+  #   2. Add public key to ~/.ssh/authorized_keys on the server
+  #   3. Add these secrets in GitHub → Settings → Secrets → Actions:
+  #        SSH_HOST         your server IP or hostname
+  #        SSH_USER         the Linux user that owns the repo (e.g. ubuntu)
+  #        SSH_PRIVATE_KEY  contents of ~/.ssh/storehub_deploy (private key)
+  #   4. Clone the repo on the server and run: bash scripts/deploy.sh
+  #   5. Set up PM2 on the server: pm2 start ecosystem.config.cjs --env production && pm2 save && pm2 startup
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        if: ${{ env.SSH_HOST != '' }}
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd ~/storehub-project
+            bash scripts/deploy.sh
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+
+      - name: No SSH configured (local-only mode)
+        if: ${{ env.SSH_HOST == '' }}
+        run: |
+          echo "SSH_HOST secret not set — skipping cloud deploy."
+          echo "Running locally? The Task Scheduler poller handles auto-deploy."
+          echo "To enable cloud deploy, see comments in this file."
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
