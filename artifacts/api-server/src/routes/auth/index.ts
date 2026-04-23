@@ -37,13 +37,14 @@ function userAgent(req: { headers: Record<string, string | string[] | undefined>
   return String(req.headers["user-agent"] ?? "unknown").slice(0, 250);
 }
 
-function sanitizeUser(user: { id: string; email: string | null; fullName: string; emailVerified: boolean; phoneNumber: string | null; createdAt: Date; lastLoginAt: Date | null }) {
+function sanitizeUser(user: { id: string; email: string | null; fullName: string; emailVerified: boolean; phoneNumber: string | null; role: string; createdAt: Date; lastLoginAt: Date | null }) {
   return {
     id:            user.id,
     email:         user.email,
     fullName:      user.fullName,
     emailVerified: user.emailVerified,
     phoneNumber:   user.phoneNumber,
+    role:          user.role,
     createdAt:     user.createdAt,
     lastLoginAt:   user.lastLoginAt,
   };
@@ -152,8 +153,8 @@ router.post("/login", async (req, res) => {
   // Reset failed attempts
   await db.update(users).set({ failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
-  const accessToken  = signAccessToken( { userId: user.id, email: user.email! });
-  const refreshToken = signRefreshToken({ userId: user.id, email: user.email! });
+  const accessToken  = signAccessToken( { userId: user.id, email: user.email!, role: user.role });
+  const refreshToken = signRefreshToken({ userId: user.id, email: user.email!, role: user.role });
 
   await db.insert(refreshTokens).values({
     userId:    user.id,
@@ -220,7 +221,7 @@ router.post("/refresh", async (req, res) => {
     return res.status(401).json({ error: "User not found" });
   }
 
-  const newAccessToken = signAccessToken({ userId: user.id, email: user.email! });
+  const newAccessToken = signAccessToken({ userId: user.id, email: user.email!, role: user.role });
 
   res.cookie("sh_access", newAccessToken, {
     httpOnly: true,
@@ -393,8 +394,8 @@ router.post("/phone/verify-otp", async (req, res) => {
 
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, authUser.id));
 
-  const accessToken  = signAccessToken( { userId: authUser.id, email: authUser.email ?? phone });
-  const refreshToken = signRefreshToken({ userId: authUser.id, email: authUser.email ?? phone });
+  const accessToken  = signAccessToken( { userId: authUser.id, email: authUser.email ?? phone, role: authUser.role });
+  const refreshToken = signRefreshToken({ userId: authUser.id, email: authUser.email ?? phone, role: authUser.role });
 
   await db.insert(refreshTokens).values({
     userId:    authUser.id,
@@ -468,8 +469,8 @@ router.post("/social/:provider", async (req, res) => {
 
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, authUser.id));
 
-  const accessToken  = signAccessToken( { userId: authUser.id, email: authUser.email ?? email });
-  const refreshToken = signRefreshToken({ userId: authUser.id, email: authUser.email ?? email });
+  const accessToken  = signAccessToken( { userId: authUser.id, email: authUser.email ?? email, role: authUser.role });
+  const refreshToken = signRefreshToken({ userId: authUser.id, email: authUser.email ?? email, role: authUser.role });
 
   await db.insert(refreshTokens).values({
     userId:    authUser.id,
@@ -627,8 +628,8 @@ router.post("/webauthn/login-finish", async (req, res) => {
 
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
-  const accessToken  = signAccessToken( { userId: user.id, email: user.email! });
-  const refreshToken = signRefreshToken({ userId: user.id, email: user.email! });
+  const accessToken  = signAccessToken( { userId: user.id, email: user.email!, role: user.role });
+  const refreshToken = signRefreshToken({ userId: user.id, email: user.email!, role: user.role });
 
   await db.insert(refreshTokens).values({
     userId:    user.id,

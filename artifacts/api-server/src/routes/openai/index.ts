@@ -2,24 +2,30 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { conversations, messages } from "@workspace/db";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { requireAuth } from "../../middlewares/requireAuth.js";
 
 const router = Router();
 
-router.get("/conversations", async (_req, res) => {
-  const rows = await db.select().from(conversations).orderBy(conversations.createdAt);
+router.use(requireAuth);
+
+router.get("/conversations", async (req, res) => {
+  const rows = await db.select().from(conversations)
+    .where(eq(conversations.userId, req.userId!))
+    .orderBy(conversations.createdAt);
   res.json(rows);
 });
 
 router.post("/conversations", async (req, res) => {
   const { title } = req.body as { title: string };
-  const [row] = await db.insert(conversations).values({ title }).returning();
+  const [row] = await db.insert(conversations).values({ title, userId: req.userId! }).returning();
   res.status(201).json(row);
 });
 
 router.get("/conversations/:id", async (req, res) => {
   const id = parseInt(req.params.id);
-  const [conv] = await db.select().from(conversations).where(eq(conversations.id, id));
+  const [conv] = await db.select().from(conversations)
+    .where(and(eq(conversations.id, id), eq(conversations.userId, req.userId!)));
   if (!conv) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -30,7 +36,8 @@ router.get("/conversations/:id", async (req, res) => {
 
 router.delete("/conversations/:id", async (req, res) => {
   const id = parseInt(req.params.id);
-  const [conv] = await db.select().from(conversations).where(eq(conversations.id, id));
+  const [conv] = await db.select().from(conversations)
+    .where(and(eq(conversations.id, id), eq(conversations.userId, req.userId!)));
   if (!conv) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -41,6 +48,12 @@ router.delete("/conversations/:id", async (req, res) => {
 
 router.get("/conversations/:id/messages", async (req, res) => {
   const id = parseInt(req.params.id);
+  const [conv] = await db.select().from(conversations)
+    .where(and(eq(conversations.id, id), eq(conversations.userId, req.userId!)));
+  if (!conv) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
   const msgs = await db.select().from(messages).where(eq(messages.conversationId, id)).orderBy(messages.createdAt);
   res.json(msgs);
 });
@@ -49,7 +62,8 @@ router.post("/conversations/:id/messages", async (req, res) => {
   const id = parseInt(req.params.id);
   const { content, systemContext } = req.body as { content: string; systemContext?: string };
 
-  const [conv] = await db.select().from(conversations).where(eq(conversations.id, id));
+  const [conv] = await db.select().from(conversations)
+    .where(and(eq(conversations.id, id), eq(conversations.userId, req.userId!)));
   if (!conv) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -118,7 +132,7 @@ You are friendly, concise, and practical. Always give step-by-step instructions 
 
     await db.insert(messages).values({ conversationId: id, role: "assistant", content: fullResponse });
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-  } catch (err) {
+  } catch {
     res.write(`data: ${JSON.stringify({ error: "AI error", done: true })}\n\n`);
   }
 

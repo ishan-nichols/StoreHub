@@ -19,6 +19,7 @@ export interface AuthUser {
   fullName:      string;
   emailVerified: boolean;
   phoneNumber:   string | null;
+  role:          string;
   createdAt:     string;
   lastLoginAt:   string | null;
 }

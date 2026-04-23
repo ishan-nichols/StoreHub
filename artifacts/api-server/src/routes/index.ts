@@ -8,6 +8,7 @@ import barcodeRouter from "./barcode/index.js";
 import upcRouter from "./upc/index.js";
 import squareRouter from "./square/index.js";
 import storehubRouter from "./storehub/index.js";
+import adminRouter from "./admin/index.js";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use("/barcode",  barcodeRouter);
 router.use("/upc",      upcRouter);
 router.use("/square",   squareRouter);
 router.use("/store",    storehubRouter);
+router.use("/admin",    adminRouter);
 
 export default router;

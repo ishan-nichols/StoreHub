@@ -9,6 +9,7 @@ export const users = pgTable("users", {
   passwordHash:   varchar("password_hash", { length: 255 }),
   emailVerified:  boolean("email_verified").notNull().default(false),
   phoneNumber:    varchar("phone_number", { length: 50 }).unique(),
+  role:           varchar("role", { length: 20 }).notNull().default("store_owner"), // 'superadmin' | 'store_owner'
   createdAt:      timestamp("created_at",   { withTimezone: true }).notNull().defaultNow(),
   lastLoginAt:    timestamp("last_login_at",{ withTimezone: true }),
   lockedUntil:    timestamp("locked_until", { withTimezone: true }),

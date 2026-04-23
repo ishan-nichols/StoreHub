@@ -14,6 +14,7 @@ interface AuthContextValue {
   user:            AuthUser | null;
   isLoading:       boolean;
   isAuthenticated: boolean;
+  isAdmin:         boolean;
   setUser:         (user: AuthUser | null) => void;
   logout:          () => Promise<void>;
   recheckAuth:     () => Promise<void>;
@@ -80,6 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       isLoading,
       isAuthenticated: !!user,
+      isAdmin: user?.role === "superadmin",
       setUser,
       logout,
       recheckAuth,

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { AppProvider } from "./contexts/AppContext";
 import { useApp } from "./contexts/useApp";
-import { AuthProvider } from "./contexts/AuthContext";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { CloudSyncBootstrap } from "./components/CloudSyncBootstrap";
 import Layout from "./components/Layout";
 import AIChatWidget from "./components/AIChatWidget";
@@ -15,7 +15,7 @@ import SignUpPage         from "./pages/auth/SignUpPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
 import PhoneLoginPage     from "./pages/auth/PhoneLoginPage";
 
-// App screens
+// Store screens
 import OnboardingPage   from "./pages/OnboardingPage";
 import DashboardPage    from "./pages/DashboardPage";
 import InventoryPage    from "./pages/InventoryPage";
@@ -30,9 +30,31 @@ import ReportsPage      from "./pages/ReportsPage";
 import AutomationsPage  from "./pages/AutomationsPage";
 import IntegrationsPage from "./pages/IntegrationsPage";
 
+// Admin screens
+import AdminDashboardPage    from "./pages/admin/AdminDashboardPage";
+import AdminStoresPage       from "./pages/admin/AdminStoresPage";
+import AdminStoreDetailPage  from "./pages/admin/AdminStoreDetailPage";
+import AdminCreateStorePage  from "./pages/admin/AdminCreateStorePage";
+
 const queryClient = new QueryClient();
 
-function AppRoutes() {
+// ─── Admin routing tree ───────────────────────────────────────────────────────
+
+function AdminApp() {
+  return (
+    <Switch>
+      <Route path="/admin"              component={AdminDashboardPage} />
+      <Route path="/admin/stores/new"   component={AdminCreateStorePage} />
+      <Route path="/admin/stores/:userId" component={AdminStoreDetailPage} />
+      <Route path="/admin/stores"       component={AdminStoresPage} />
+      <Route><Redirect to="/admin" /></Route>
+    </Switch>
+  );
+}
+
+// ─── Store routing tree ───────────────────────────────────────────────────────
+
+function StoreRoutes() {
   const { isOnboarded, isLoading } = useApp();
 
   if (isLoading) {
@@ -57,25 +79,16 @@ function AppRoutes() {
 
   return (
     <Switch>
-      {/* Employee portal — standalone, no main auth required */}
       <Route path="/employee" component={EmployeePortalPage} />
-
-      {/* Auth screens */}
-      <Route path="/splash"         component={SplashScreen} />
-      <Route path="/login"          component={LoginPage} />
-      <Route path="/login/phone"    component={PhoneLoginPage} />
-      <Route path="/signup"         component={SignUpPage} />
+      <Route path="/splash"          component={SplashScreen} />
+      <Route path="/login"           component={LoginPage} />
+      <Route path="/login/phone"     component={PhoneLoginPage} />
+      <Route path="/signup"          component={SignUpPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
-
-      {/* Onboarding */}
-      <Route path="/onboarding" component={OnboardingPage} />
-
-      {/* Root redirect */}
+      <Route path="/onboarding"      component={OnboardingPage} />
       <Route path="/">
         {isOnboarded ? <Redirect to="/dashboard" /> : <Redirect to="/login" />}
       </Route>
-
-      {/* Protected app pages */}
       <Route path="/dashboard">   {protectedPage(DashboardPage)}    </Route>
       <Route path="/inventory">   {protectedPage(InventoryPage)}    </Route>
       <Route path="/pos">         {protectedPage(POSPage)}          </Route>
@@ -87,8 +100,6 @@ function AppRoutes() {
       <Route path="/automations"> {protectedPage(AutomationsPage)}  </Route>
       <Route path="/integrations">{protectedPage(IntegrationsPage)} </Route>
       <Route path="/settings">    {protectedPage(SettingsPage)}     </Route>
-
-      {/* Fallback */}
       <Route>
         {isOnboarded ? <Redirect to="/dashboard" /> : <Redirect to="/login" />}
       </Route>
@@ -96,13 +107,58 @@ function AppRoutes() {
   );
 }
 
-function AppInner() {
+function StoreApp() {
   const { isOnboarded } = useApp();
   return (
     <>
-      <AppRoutes />
+      <StoreRoutes />
       {isOnboarded && <AIChatWidget />}
     </>
+  );
+}
+
+// ─── Root — branches on role ──────────────────────────────────────────────────
+
+function AppInner() {
+  const { user, isLoading, isAdmin } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="text-center space-y-2">
+          <div className="text-2xl font-bold text-emerald-600">StoreHub</div>
+          <div className="text-sm text-gray-400 animate-pulse">Loading...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Superadmin: completely separate app, no store data loading
+  if (isAdmin) {
+    return <AdminApp />;
+  }
+
+  // Unauthenticated users trying to hit /admin — redirect to login
+  if (!user) {
+    return (
+      <Switch>
+        <Route path="/employee" component={EmployeePortalPage} />
+        <Route path="/splash"          component={SplashScreen} />
+        <Route path="/login"           component={LoginPage} />
+        <Route path="/login/phone"     component={PhoneLoginPage} />
+        <Route path="/signup"          component={SignUpPage} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
+        <Route><Redirect to="/login" /></Route>
+      </Switch>
+    );
+  }
+
+  // Regular store owners
+  return (
+    <AppProvider>
+      <CloudSyncBootstrap />
+      <StoreApp />
+    </AppProvider>
   );
 }
 
@@ -110,13 +166,10 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <AppProvider>
-          <CloudSyncBootstrap />
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <AppInner />
-          </WouterRouter>
-          <Toaster />
-        </AppProvider>
+        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          <AppInner />
+        </WouterRouter>
+        <Toaster />
       </AuthProvider>
     </QueryClientProvider>
   );
