@@ -1,7 +1,13 @@
 import { createContext } from "react";
-import type { Language, Theme } from "../schemas";
+import type { HoverStyle, Language, MotionLevel, SurfaceStyle, Theme, UIPreferences } from "../schemas";
 import type { Translations } from "../locales";
 import type { UserProfile } from "../schemas";
+
+export interface ResolvedUIPreferences {
+  motionLevel: MotionLevel;
+  hoverStyle: HoverStyle;
+  surfaceStyle: SurfaceStyle;
+}
 
 export interface AppContextValue {
   profile: UserProfile | null;
@@ -15,6 +21,8 @@ export interface AppContextValue {
   refreshProfile: () => Promise<void>;
   trackFeature: (feature: string) => Promise<void>;
   getFeatureOrder: () => string[];
+  uiPreferences: ResolvedUIPreferences;
+  updateUIPreferences: (updates: Partial<UIPreferences>) => Promise<void>;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

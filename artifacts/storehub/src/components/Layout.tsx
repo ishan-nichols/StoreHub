@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useApp } from "../contexts/useApp";
 import {
@@ -29,9 +29,10 @@ interface NavItem {
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-  const { profile, t, trackFeature } = useApp();
+  const { profile, t, trackFeature, uiPreferences } = useApp();
   const [location, setLocation] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mainRef = useRef<HTMLElement | null>(null);
 
   const isSolo = profile?.storeSize === "solo" || (profile?.numEmployees === 0 && profile?.onboardingVersion === 2);
   const painPoints = profile?.painPoints ?? [];
@@ -71,6 +72,60 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const storeName = profile?.storeName || "StoreHub";
   const ownerFirstName = profile?.ownerName?.split(" ")[0] || "there";
 
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el || uiPreferences.motionLevel === "reduced") return;
+
+    let frame = 0;
+    let target = el.scrollTop;
+    let current = el.scrollTop;
+    let programmatic = false;
+
+    const animate = () => {
+      const lerp = Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--scroll-lerp"),
+      );
+      current += (target - current) * (Number.isFinite(lerp) ? lerp : 0.14);
+      if (Math.abs(target - current) < 0.5) {
+        current = target;
+      }
+
+      programmatic = true;
+      el.scrollTop = current;
+      programmatic = false;
+
+      if (Math.abs(target - current) >= 0.5) {
+        frame = window.requestAnimationFrame(animate);
+      } else {
+        frame = 0;
+      }
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      event.preventDefault();
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      target = Math.max(0, Math.min(maxScroll, target + event.deltaY));
+      if (!frame) {
+        frame = window.requestAnimationFrame(animate);
+      }
+    };
+
+    const onScroll = () => {
+      if (programmatic) return;
+      target = el.scrollTop;
+      current = el.scrollTop;
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("scroll", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [uiPreferences.motionLevel]);
+
   function navigate(item: NavItem) {
     trackFeature(item.key);
     setLocation(item.path);
@@ -85,7 +140,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex h-full flex-col">
         <div className="px-5 pb-5 pt-6">
-          <div className="glass-panel rounded-[28px] p-4">
+          <div className="glass-panel motion-card rounded-[28px] p-4">
             <div className="flex items-start gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-orange-400 to-amber-600 text-white shadow-lg shadow-amber-200/80">
                 <Store size={20} />
@@ -119,7 +174,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <button
                 key={item.key}
                 onClick={() => navigate(item)}
-                className={`group flex w-full items-center gap-3 rounded-[22px] px-4 py-3 text-left transition-all ${
+                className={`nav-motion-item group flex w-full items-center gap-3 rounded-[22px] px-4 py-3 text-left transition-all ${
                   active
                     ? "bg-stone-950 text-white shadow-lg shadow-stone-900/10"
                     : "text-stone-600 hover:bg-white/70 hover:text-stone-900"
@@ -143,7 +198,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               href="/employee"
               target="_blank"
               rel="noopener noreferrer"
-              className="soft-panel mb-3 flex items-center gap-3 rounded-[24px] px-4 py-3 text-sm text-stone-700 transition-transform hover:-translate-y-0.5"
+              className="soft-panel motion-card mb-3 flex items-center gap-3 rounded-[24px] px-4 py-3 text-sm text-stone-700 transition-transform hover:-translate-y-0.5"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
                 <Users size={18} />
@@ -156,7 +211,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </a>
           )}
 
-          <div className="rounded-[24px] border border-white/70 bg-white/72 px-4 py-3 shadow-sm backdrop-blur-md">
+          <div className="motion-card rounded-[24px] border border-white/70 bg-white/72 px-4 py-3 shadow-sm backdrop-blur-md">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-stone-900 to-stone-700 text-sm font-semibold text-white">
                 {ownerFirstName.slice(0, 1).toUpperCase()}
@@ -185,7 +240,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <aside className="absolute inset-y-0 left-0 w-[88%] max-w-[320px] bg-[#f4efe6] shadow-2xl">
             <button
               onClick={() => setMobileOpen(false)}
-              className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-2xl bg-white/75 text-stone-500"
+              className="motion-button absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-2xl bg-white/75 text-stone-500"
             >
               <X size={18} />
             </button>
@@ -200,7 +255,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setMobileOpen(true)}
-                className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-stone-600 shadow-sm md:hidden"
+                className="motion-button flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-stone-600 shadow-sm md:hidden"
               >
                 <Menu size={18} />
               </button>
@@ -217,7 +272,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6">{children}</main>
+        <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6">
+          <div className="page-reveal">{children}</div>
+        </main>
       </div>
     </div>
   );

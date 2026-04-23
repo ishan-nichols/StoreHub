@@ -1,16 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useApp } from "../contexts/useApp";
 import { useAuth } from "../contexts/AuthContext";
-import type { UserProfile, Language, Theme } from "../schemas";
+import type { UserProfile, Language, Theme, MotionLevel, HoverStyle, SurfaceStyle } from "../schemas";
 import { updateUserProfile, clearAllData } from "../services/dataService";
 import { COLOR_PRESETS, DEFAULT_ACCENT, applyAccentColor } from "../lib/themeColors";
 import { getStorageMode, setStorageMode, type StorageMode } from "../services/storageMode";
 import { pullAll, pushSnapshot } from "../services/cloudSync";
 import { useLocation } from "wouter";
 import { getCurrencySymbol } from "../utils";
+import { ActionPill, PageHero, SectionTitle, SummaryTile, SurfaceCard } from "../components/page-shell";
 import {
   CheckCircle, Printer, MapPin, Plug, Globe, RotateCcw, ChevronRight,
-  Cloud, HardDrive, LogIn, LogOut, UploadCloud, DownloadCloud, Loader2
+  Cloud, HardDrive, LogIn, LogOut, UploadCloud, DownloadCloud, Loader2, Sparkles, Wand2, Layers3
 } from "lucide-react";
 
 const PAIN_POINT_LABELS: Record<string, string> = {
@@ -73,11 +74,12 @@ const INTEGRATIONS = [
 ];
 
 export default function SettingsPage() {
-  const { profile, t, refreshProfile } = useApp();
+  const { profile, t, refreshProfile, uiPreferences, updateUIPreferences } = useApp();
   const [, setLocation] = useLocation();
   const [saved, setSaved] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [testPrinting, setTestPrinting] = useState(false);
+  const didHydratePreview = useRef(false);
 
   const [storeName, setStoreName] = useState(profile?.storeName ?? "");
   const [ownerName, setOwnerName] = useState(profile?.ownerName ?? "");
@@ -86,6 +88,24 @@ export default function SettingsPage() {
   const [language, setLanguage] = useState<Language>(profile?.language ?? "en");
   const [theme, setTheme] = useState<Theme>(profile?.theme ?? "light");
   const [accentColor, setAccentColor] = useState<string>(profile?.accentColor ?? DEFAULT_ACCENT);
+  const [motionLevel, setMotionLevel] = useState<MotionLevel>(uiPreferences.motionLevel);
+  const [hoverStyle, setHoverStyle] = useState<HoverStyle>(uiPreferences.hoverStyle);
+  const [surfaceStyle, setSurfaceStyle] = useState<SurfaceStyle>(uiPreferences.surfaceStyle);
+
+  useEffect(() => {
+    if (!didHydratePreview.current) {
+      didHydratePreview.current = true;
+      return;
+    }
+    if (
+      uiPreferences.motionLevel === motionLevel &&
+      uiPreferences.hoverStyle === hoverStyle &&
+      uiPreferences.surfaceStyle === surfaceStyle
+    ) {
+      return;
+    }
+    void updateUIPreferences({ motionLevel, hoverStyle, surfaceStyle });
+  }, [motionLevel, hoverStyle, surfaceStyle, uiPreferences, updateUIPreferences]);
 
   function pickAccent(hex: string) {
     setAccentColor(hex);
@@ -114,8 +134,18 @@ export default function SettingsPage() {
       storeAddress: storeAddress.trim(),
       printerName: printerName.trim(),
       printerConnection,
+      uiPreferences: {
+        motionLevel,
+        hoverStyle,
+        surfaceStyle,
+      },
     });
     await refreshProfile();
+    await updateUIPreferences({
+      motionLevel,
+      hoverStyle,
+      surfaceStyle,
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   }
@@ -158,8 +188,32 @@ export default function SettingsPage() {
   const hasOnboardingV2 = profile?.onboardingVersion === 2;
 
   return (
-    <div className="p-4 md:p-6 max-w-2xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">{t.settings.title}</h1>
+    <div className="mx-auto max-w-6xl space-y-8">
+      <PageHero
+        eyebrow="Settings"
+        title="Tune the feel of your workspace"
+        description="Personalize the atmosphere, motion, and controls without losing the calm premium look. Everything here updates the app-wide experience."
+        actions={
+          <>
+            <ActionPill>
+              <Sparkles size={16} className="text-amber-500" />
+              Live visual preferences
+            </ActionPill>
+            <ActionPill onClick={handleSave}>
+              <CheckCircle size={16} className="text-emerald-600" />
+              {saved ? "Saved" : "Save changes"}
+            </ActionPill>
+          </>
+        }
+        stats={
+          <>
+            <SummaryTile label="Motion" value={motionLabel(motionLevel)} hint="How animated the interface feels" />
+            <SummaryTile label="Hover feel" value={hoverLabel(hoverStyle)} hint="Depth and movement on interaction" />
+            <SummaryTile label="Surfaces" value={surfaceLabel(surfaceStyle)} hint="How glassy or solid panels appear" />
+            <SummaryTile label="Accent" value={colorName(accentColor)} hint="Your current signature color" />
+          </>
+        }
+      />
 
       {/* Your Setup Summary (v2 onboarding only) */}
       {hasOnboardingV2 && (
@@ -214,6 +268,66 @@ export default function SettingsPage() {
           </div>
         </Section>
       )}
+
+      <SurfaceCard className="space-y-6">
+        <SectionTitle
+          title="Experience customization"
+          description="These controls shape the way the product moves, hovers, and layers. They stay subtle by design so the Apple-like calm still comes through."
+          aside={
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+              <Wand2 size={14} className="text-amber-500" />
+              Live preview
+            </div>
+          }
+        />
+
+        <div className="grid gap-6 lg:grid-cols-3">
+          <PreferenceGroup
+            icon={<Sparkles size={16} className="text-amber-600" />}
+            title="Motion style"
+            description="Control reveal speed, hover animation, and how energetic the interface feels."
+          >
+            <PreferencePill
+              active={motionLevel === "reduced"}
+              title="Reduced"
+              description="Clean and steady with almost no motion."
+              onClick={() => setMotionLevel("reduced")}
+            />
+            <PreferencePill
+              active={motionLevel === "gentle"}
+              title="Gentle"
+              description="Soft movement and calm transitions."
+              onClick={() => setMotionLevel("gentle")}
+            />
+            <PreferencePill
+              active={motionLevel === "expressive"}
+              title="Expressive"
+              description="More cinematic movement and weighted flow."
+              onClick={() => setMotionLevel("expressive")}
+            />
+          </PreferenceGroup>
+
+          <PreferenceGroup
+            icon={<ArrowIcon />}
+            title="Hover depth"
+            description="Choose how much cards and controls lift when your mouse reaches them."
+          >
+            <PreferencePill active={hoverStyle === "soft"} title="Soft" description="Barely-there movement." onClick={() => setHoverStyle("soft")} />
+            <PreferencePill active={hoverStyle === "lifted"} title="Lifted" description="Balanced depth and polish." onClick={() => setHoverStyle("lifted")} />
+            <PreferencePill active={hoverStyle === "dramatic"} title="Dramatic" description="More dimensional and tactile." onClick={() => setHoverStyle("dramatic")} />
+          </PreferenceGroup>
+
+          <PreferenceGroup
+            icon={<Layers3 size={16} className="text-amber-600" />}
+            title="Surface finish"
+            description="Adjust how airy, glassy, or grounded the interface panels feel."
+          >
+            <PreferencePill active={surfaceStyle === "glass"} title="Glass" description="Maximum translucency and glow." onClick={() => setSurfaceStyle("glass")} />
+            <PreferencePill active={surfaceStyle === "balanced"} title="Balanced" description="Soft glass with stronger readability." onClick={() => setSurfaceStyle("balanced")} />
+            <PreferencePill active={surfaceStyle === "solid"} title="Solid" description="More opaque and focused." onClick={() => setSurfaceStyle("solid")} />
+          </PreferenceGroup>
+        </div>
+      </SurfaceCard>
 
       {/* Retake for older users */}
       {!hasOnboardingV2 && (
@@ -506,7 +620,7 @@ export default function SettingsPage() {
       {/* Save Button */}
       <button
         onClick={handleSave}
-        className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl py-4 text-base transition-colors shadow-md shadow-amber-200 dark:shadow-amber-900/20 flex items-center justify-center gap-2"
+        className="motion-button w-full bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl py-4 text-base transition-colors shadow-md shadow-amber-200 dark:shadow-amber-900/20 flex items-center justify-center gap-2"
       >
         {saved ? (
           <><CheckCircle size={18} /> {t.settings.saved}</>
@@ -742,10 +856,10 @@ const inputCls = "w-full border border-gray-200 dark:border-gray-600 rounded-xl 
 
 function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5 space-y-4">
+    <SurfaceCard className="space-y-4">
       <h2 className="font-bold text-gray-700 dark:text-gray-200 text-sm uppercase tracking-wide">{title}</h2>
       {children}
-    </div>
+    </SurfaceCard>
   );
 }
 
@@ -764,5 +878,83 @@ function SetupRow({ label, value }: { label: string; value: string }) {
       <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide shrink-0 mt-0.5 w-28">{label}</span>
       <span className="text-sm text-gray-700 dark:text-gray-200 font-medium">{value}</span>
     </div>
+  );
+}
+
+function PreferenceGroup({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[28px] border border-white/80 bg-white/74 p-5 shadow-sm">
+      <div className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+        {icon}
+        {title}
+      </div>
+      <p className="mt-2 text-sm leading-6 text-stone-500">{description}</p>
+      <div className="mt-4 space-y-3">{children}</div>
+    </div>
+  );
+}
+
+function PreferencePill({
+  active,
+  title,
+  description,
+  onClick,
+}: {
+  active: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`motion-button w-full rounded-2xl border px-4 py-3 text-left transition-all ${
+        active
+          ? "border-amber-300 bg-amber-50/90 text-stone-900 shadow-sm"
+          : "border-stone-200 bg-white/90 text-stone-600 hover:border-amber-200"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold">{title}</span>
+        {active && <CheckCircle size={16} className="text-amber-600" />}
+      </div>
+      <p className="mt-1 text-xs leading-5 text-stone-500">{description}</p>
+    </button>
+  );
+}
+
+function motionLabel(value: MotionLevel) {
+  return { reduced: "Reduced", gentle: "Gentle", expressive: "Expressive" }[value];
+}
+
+function hoverLabel(value: HoverStyle) {
+  return { soft: "Soft", lifted: "Lifted", dramatic: "Dramatic" }[value];
+}
+
+function surfaceLabel(value: SurfaceStyle) {
+  return { glass: "Glass", balanced: "Balanced", solid: "Solid" }[value];
+}
+
+function colorName(hex: string) {
+  return COLOR_PRESETS.find((preset) => preset.hex.toLowerCase() === hex.toLowerCase())?.name ?? "Custom";
+}
+
+function ArrowIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 text-amber-600" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M5 12h14" />
+      <path d="m13 6 6 6-6 6" />
+    </svg>
   );
 }

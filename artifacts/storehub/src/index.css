@@ -68,6 +68,20 @@
 
 /* LIGHT MODE — Warm amber/cream palette */
 :root {
+  --hover-lift-base: -4px;
+  --hover-scale-base: 1.008;
+  --hover-lift: var(--hover-lift-base);
+  --hover-scale: var(--hover-scale-base);
+  --surface-tilt: 0.4deg;
+  --motion-duration: 280ms;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --scroll-lerp: 0.14;
+  --ambient-strength: 0.24;
+  --shadow-float: 0 28px 52px rgba(120, 98, 64, 0.14);
+  --glass-opacity: 0.82;
+  --soft-opacity: 0.94;
+  --panel-blur: 18px;
+  --panel-border: rgba(255, 255, 255, 0.72);
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
   --opaque-button-border-intensity: -8;
@@ -197,9 +211,11 @@
     @apply font-sans antialiased bg-background text-foreground;
     background:
       radial-gradient(circle at top left, rgba(255, 255, 255, 0.95), transparent 28%),
-      radial-gradient(circle at top right, rgba(251, 191, 36, 0.18), transparent 24%),
+      radial-gradient(circle at top right, color-mix(in srgb, hsl(var(--primary)) calc(var(--ambient-strength) * 100%), transparent), transparent 24%),
+      radial-gradient(circle at 20% 80%, color-mix(in srgb, hsl(var(--primary)) calc(var(--ambient-strength) * 45%), white), transparent 20%),
       linear-gradient(180deg, #fffef9 0%, #f6f1e7 100%);
     min-height: 100vh;
+    overflow: hidden;
   }
 }
 
@@ -218,14 +234,14 @@
 }
 
 .glass-panel {
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(22px);
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, var(--glass-opacity));
+  backdrop-filter: blur(var(--panel-blur));
+  border: 1px solid var(--panel-border);
   box-shadow: 0 24px 60px rgba(148, 113, 52, 0.14);
 }
 
 .soft-panel {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, var(--soft-opacity));
   border: 1px solid rgba(221, 214, 201, 0.9);
   box-shadow: 0 18px 40px rgba(120, 98, 64, 0.08);
 }
@@ -244,6 +260,70 @@
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+.page-reveal {
+  animation: page-enter calc(var(--motion-duration) * 1.8) var(--motion-ease);
+  transform-origin: top center;
+}
+
+.motion-card,
+.motion-button,
+.nav-motion-item {
+  transition:
+    transform var(--motion-duration) var(--motion-ease),
+    box-shadow var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    background-color var(--motion-duration) var(--motion-ease),
+    filter var(--motion-duration) var(--motion-ease);
+  transform-origin: center;
+  will-change: transform;
+}
+
+.motion-card:hover,
+.motion-card:focus-visible {
+  transform: translateY(var(--hover-lift)) scale(var(--hover-scale)) rotateX(var(--surface-tilt));
+  box-shadow: var(--shadow-float);
+}
+
+.motion-button:hover,
+.motion-button:focus-visible {
+  transform: translateY(calc(var(--hover-lift) * 0.75)) scale(var(--hover-scale));
+  box-shadow: 0 18px 36px rgba(120, 98, 64, 0.16);
+}
+
+.nav-motion-item:hover,
+.nav-motion-item:focus-visible {
+  transform: translateX(6px) translateY(calc(var(--hover-lift) * 0.35));
+}
+
+html[data-motion="reduced"] .page-reveal,
+html[data-motion="reduced"] .motion-card,
+html[data-motion="reduced"] .motion-button,
+html[data-motion="reduced"] .nav-motion-item {
+  animation: none;
+  transition-duration: 140ms;
+}
+
+html[data-motion="reduced"] .motion-card:hover,
+html[data-motion="reduced"] .motion-card:focus-visible,
+html[data-motion="reduced"] .motion-button:hover,
+html[data-motion="reduced"] .motion-button:focus-visible,
+html[data-motion="reduced"] .nav-motion-item:hover,
+html[data-motion="reduced"] .nav-motion-item:focus-visible {
+  transform: none;
+  box-shadow: none;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @layer utilities {

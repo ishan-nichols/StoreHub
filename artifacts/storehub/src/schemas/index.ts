@@ -4,11 +4,20 @@ export type Language = "en" | "es";
 export type Theme = "light" | "dark";
 export type StoreSize = "solo" | "small" | "medium" | "multi";
 export type CurrentSystem = "paper" | "spreadsheets" | "pos" | "multiple";
+export type MotionLevel = "reduced" | "gentle" | "expressive";
+export type HoverStyle = "soft" | "lifted" | "dramatic";
+export type SurfaceStyle = "glass" | "balanced" | "solid";
 
 export interface OpeningHours {
   open: string;
   close: string;
   closed: boolean;
+}
+
+export interface UIPreferences {
+  motionLevel?: MotionLevel;
+  hoverStyle?: HoverStyle;
+  surfaceStyle?: SurfaceStyle;
 }
 
 export interface UserProfile {
@@ -48,6 +57,7 @@ export interface UserProfile {
   scheduleStyle?: string;
   goal?: string;
   lastUpdated?: string;
+  uiPreferences?: UIPreferences;
 }
 
 export type PosSyncStatus = "synced" | "pending" | "failed" | "not_connected";
