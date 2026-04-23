@@ -11,6 +11,9 @@ import { saveToLibrary, type BarcodeProductInfo } from "../services/barcodeServi
 import { createProduct, deleteProduct, getProducts, getSuppliers, updateProduct } from "../services/dataService";
 import type { InsertProduct, Product, Supplier } from "../schemas";
 import { formatCurrency } from "../utils";
+import IngredientsPage from "./IngredientsPage";
+import RecipesPage from "./RecipesPage";
+import MenuPage from "./MenuPage";
 
 const emptyForm: InsertProduct = {
   name: "",
@@ -28,7 +31,51 @@ const emptyForm: InsertProduct = {
   marginAlertPct: 15,
 };
 
+// ─── Restaurant wrapper ───────────────────────────────────────────────────────
+
+type RestaurantTab = "ingredients" | "recipes" | "menu";
+
+function RestaurantInventory() {
+  const [activeTab, setActiveTab] = useState<RestaurantTab>("ingredients");
+  const tabs: { id: RestaurantTab; label: string }[] = [
+    { id: "ingredients", label: "Ingredients" },
+    { id: "recipes",     label: "Recipes" },
+    { id: "menu",        label: "Menu" },
+  ];
+  return (
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <div className="flex gap-2 rounded-[32px] bg-stone-100 p-1.5 self-start">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`rounded-[24px] px-5 py-2.5 text-sm font-semibold transition ${
+              activeTab === tab.id
+                ? "bg-white text-stone-950 shadow-sm"
+                : "text-stone-500 hover:text-stone-700"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {activeTab === "ingredients" && <IngredientsPage />}
+      {activeTab === "recipes"     && <RecipesPage />}
+      {activeTab === "menu"        && <MenuPage />}
+    </div>
+  );
+}
+
+// ─── Main export — branches on businessType ───────────────────────────────────
+
 export default function InventoryPage() {
+  const { profile } = useApp();
+  const isRestaurant = profile?.businessType === "restaurant";
+  if (isRestaurant) return <RestaurantInventory />;
+  return <RetailInventoryPage />;
+}
+
+function RetailInventoryPage() {
   const { t, currencySymbol, profile } = useApp();
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);

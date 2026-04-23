@@ -2,11 +2,370 @@ import { useEffect, useMemo, useState } from "react";
 import { Minus, Plus, Printer, Search, ShoppingCart, Trash2, X } from "lucide-react";
 import CurrencyInput from "../components/CurrencyInput";
 import { useApp } from "../contexts/useApp";
-import { createSale, getProducts } from "../services/dataService";
+import { createSale, getProducts, API_BASE_URL } from "../services/dataService";
 import type { CartItem, Product } from "../schemas";
 import { formatCurrency } from "../utils";
 
+// ─── Restaurant POS ───────────────────────────────────────────────────────────
+
+interface MenuItemWithRecipe {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  price: string;
+  recipeId: string | null;
+  available: boolean;
+  recipeName?: string | null;
+}
+
+interface RestaurantCartItem {
+  menuItemId: string;
+  name: string;
+  price: number;
+  quantity: number;
+  category: string | null;
+}
+
+interface LowStockWarning {
+  id: string;
+  name: string;
+  stockQuantity: string;
+  unit: string;
+}
+
+const STORE_BASE = `${API_BASE_URL}/api/store`;
+
+async function storeApiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${STORE_BASE}${path}`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...init?.headers },
+    ...init,
+  });
+}
+
+function RestaurantPOS() {
+  const { currencySymbol, profile } = useApp();
+  const [menuItems, setMenuItems] = useState<MenuItemWithRecipe[]>([]);
+  const [cart, setCart] = useState<RestaurantCartItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState("All");
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [sending, setSending] = useState(false);
+  const [receipt, setReceipt] = useState<{
+    receiptNumber: string;
+    items: RestaurantCartItem[];
+    total: number;
+    lowStockWarnings: LowStockWarning[];
+  } | null>(null);
+
+  async function load() {
+    const res = await storeApiFetch("/menu/with-recipes");
+    if (res.ok) {
+      const data = (await res.json()) as MenuItemWithRecipe[];
+      setMenuItems(data.filter((i) => i.available));
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  const categories = useMemo(
+    () => ["All", ...Array.from(new Set(menuItems.map((i) => i.category).filter(Boolean) as string[]))],
+    [menuItems],
+  );
+
+  const filtered = useMemo(
+    () => activeCategory === "All" ? menuItems : menuItems.filter((i) => i.category === activeCategory),
+    [menuItems, activeCategory],
+  );
+
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+  function addToCart(item: MenuItemWithRecipe) {
+    setCart((prev) => {
+      const existing = prev.find((c) => c.menuItemId === item.id);
+      if (existing) {
+        return prev.map((c) => c.menuItemId === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+      }
+      return [...prev, { menuItemId: item.id, name: item.name, price: parseFloat(item.price), quantity: 1, category: item.category }];
+    });
+  }
+
+  function updateQty(menuItemId: string, qty: number) {
+    if (qty <= 0) setCart((prev) => prev.filter((c) => c.menuItemId !== menuItemId));
+    else setCart((prev) => prev.map((c) => c.menuItemId === menuItemId ? { ...c, quantity: qty } : c));
+  }
+
+  async function handleSendOrder() {
+    if (cart.length === 0) return;
+    setSending(true);
+    try {
+      const res = await storeApiFetch("/menu/sell", {
+        method: "POST",
+        body: JSON.stringify({
+          items: cart.map((c) => ({ menuItemId: c.menuItemId, quantity: c.quantity })),
+          paymentMethod,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json() as { sale: { receiptNumber: string }; lowStockWarnings: LowStockWarning[] };
+        setReceipt({
+          receiptNumber: data.sale.receiptNumber,
+          items: cart,
+          total,
+          lowStockWarnings: data.lowStockWarnings,
+        });
+        setCart([]);
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <section className="glass-panel rounded-[36px] p-6 md:p-8">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-400">Restaurant POS</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-stone-950">Take an order.</h1>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-stone-600">
+              Select menu items, confirm payment, and ingredients are deducted automatically.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <RestaurantHeroStat label="Items in order" value={String(cart.reduce((s, i) => s + i.quantity, 0))} />
+            <RestaurantHeroStat label="Order total" value={formatCurrency(total, currencySymbol)} emphasize />
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        {/* Menu panel */}
+        <section className="soft-panel rounded-[32px] p-5">
+          {categories.length > 1 && (
+            <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
+                    activeCategory === cat ? "bg-stone-950 text-white" : "bg-white text-stone-500 hover:bg-stone-100"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {loading ? (
+            <div className="py-16 text-center text-sm text-stone-400">Loading menu…</div>
+          ) : filtered.length === 0 ? (
+            <div className="py-16 text-center text-sm text-stone-400">
+              {menuItems.length === 0 ? "No menu items yet. Add items in Menu." : "No items in this category."}
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {filtered.map((item) => {
+                const inCart = cart.find((c) => c.menuItemId === item.id);
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => addToCart(item)}
+                    className={`rounded-[24px] border p-4 text-left transition ${
+                      inCart ? "border-amber-300 bg-amber-50" : "border-stone-200 bg-white hover:border-stone-300 hover:bg-[#fcfbf8]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="line-clamp-2 text-sm font-semibold text-stone-900">{item.name}</div>
+                        <div className="mt-1 text-xs text-stone-400">{item.category ?? "General"}</div>
+                      </div>
+                      {inCart && <span className="rounded-full bg-stone-950 px-2.5 py-1 text-xs font-semibold text-white">{inCart.quantity}</span>}
+                    </div>
+                    <div className="mt-5 flex items-end justify-between gap-3">
+                      <div className="text-lg font-semibold tracking-[-0.03em] text-stone-950">{formatCurrency(parseFloat(item.price), currencySymbol)}</div>
+                      <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-500">Tap to add</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* Order panel */}
+        <aside className="soft-panel flex h-fit flex-col rounded-[32px] p-5">
+          <div className="flex items-center gap-3 border-b border-stone-200 pb-4">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+              <ShoppingCart size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-stone-950">Order</h2>
+              <p className="text-sm text-stone-500">{cart.length === 0 ? "No items yet." : `${cart.length} item${cart.length === 1 ? "" : "s"}`}</p>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {cart.length === 0 ? (
+              <div className="rounded-[24px] bg-[#fbfaf7] px-4 py-8 text-center text-sm text-stone-500">Tap menu items to add to order.</div>
+            ) : (
+              cart.map((item) => (
+                <div key={item.menuItemId} className="rounded-[24px] bg-[#fbfaf7] px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-stone-900">{item.name}</div>
+                      <div className="mt-1 text-xs text-stone-500">{formatCurrency(item.price, currencySymbol)} each</div>
+                    </div>
+                    <button onClick={() => updateQty(item.menuItemId, 0)} className="rounded-2xl p-2 text-stone-400 transition hover:bg-rose-50 hover:text-rose-600">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <RestaurantQtyButton onClick={() => updateQty(item.menuItemId, item.quantity - 1)} icon={<Minus size={14} />} />
+                      <span className="min-w-[2rem] text-center text-sm font-semibold text-stone-900">{item.quantity}</span>
+                      <RestaurantQtyButton onClick={() => updateQty(item.menuItemId, item.quantity + 1)} icon={<Plus size={14} />} />
+                    </div>
+                    <div className="text-sm font-semibold text-stone-950">{formatCurrency(item.price * item.quantity, currencySymbol)}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="mt-5 space-y-3 border-t border-stone-200 pt-5">
+            <RestaurantLineItem label="Order Total" value={formatCurrency(total, currencySymbol)} strong />
+
+            {/* Payment method */}
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-stone-400">Payment</label>
+              <div className="flex gap-2">
+                {["Cash", "Card", "Other"].map((method) => (
+                  <button
+                    key={method}
+                    onClick={() => setPaymentMethod(method)}
+                    className={`flex-1 rounded-2xl py-2.5 text-sm font-medium transition ${
+                      paymentMethod === method
+                        ? "bg-stone-950 text-white"
+                        : "border border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
+                    }`}
+                  >
+                    {method}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCart([])}
+                disabled={cart.length === 0}
+                className="flex-1 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-600 transition hover:bg-stone-50 disabled:opacity-50"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => void handleSendOrder()}
+                disabled={cart.length === 0 || sending}
+                className="flex-[2] rounded-2xl bg-stone-950 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-50"
+              >
+                {sending ? "Processing…" : "Send Order"}
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      {/* Receipt / success modal */}
+      {receipt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[32px] bg-white shadow-2xl">
+            <div className="px-6 py-6">
+              <div className="text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-600">✓</div>
+                <h2 className="mt-4 text-xl font-semibold text-stone-950">Order Complete</h2>
+                <div className="mt-1 text-xs text-stone-400">#{receipt.receiptNumber}</div>
+              </div>
+
+              <div className="mt-5 rounded-[24px] border border-dashed border-stone-200 px-4 py-4 font-mono text-sm">
+                <div className="text-center font-semibold text-stone-950">{profile?.storeName ?? "Restaurant"}</div>
+                <div className="my-4 border-t border-dashed border-stone-200" />
+                <div className="space-y-2">
+                  {receipt.items.map((item) => (
+                    <div key={item.menuItemId} className="flex justify-between gap-3 text-stone-700">
+                      <span>{item.name} × {item.quantity}</span>
+                      <span>{formatCurrency(item.price * item.quantity, currencySymbol)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="my-4 border-t border-dashed border-stone-200" />
+                <RestaurantLineItem label="TOTAL" value={formatCurrency(receipt.total, currencySymbol)} strong />
+              </div>
+
+              {receipt.lowStockWarnings.length > 0 && (
+                <div className="mt-4 rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+                  <div className="font-semibold">Low stock warning:</div>
+                  <div className="mt-1 space-y-1">
+                    {receipt.lowStockWarnings.map((w) => (
+                      <div key={w.id}>{w.name} — {parseFloat(w.stockQuantity).toFixed(3)} {w.unit} remaining</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={() => setReceipt(null)}
+                className="mt-5 w-full rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
+              >
+                New Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RestaurantHeroStat({ label, value, emphasize = false }: { label: string; value: string; emphasize?: boolean }) {
+  return (
+    <div className={`rounded-[24px] px-4 py-4 ${emphasize ? "bg-stone-950 text-white" : "bg-white/72 text-stone-900"}`}>
+      <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${emphasize ? "text-white/50" : "text-stone-400"}`}>{label}</div>
+      <div className="mt-3 text-2xl font-semibold tracking-[-0.04em]">{value}</div>
+    </div>
+  );
+}
+
+function RestaurantQtyButton({ onClick, icon }: { onClick: () => void; icon: React.ReactNode }) {
+  return (
+    <button onClick={onClick} className="flex h-8 w-8 items-center justify-center rounded-2xl bg-white text-stone-600 transition hover:bg-stone-100">
+      {icon}
+    </button>
+  );
+}
+
+function RestaurantLineItem({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between gap-3 py-1 text-sm ${strong ? "font-semibold text-stone-950" : "text-stone-600"}`}>
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+// ─── Main export — branches on businessType ───────────────────────────────────
+
 export default function POSPage() {
+  const { profile } = useApp();
+  const isRestaurant = profile?.businessType === "restaurant";
+  if (isRestaurant) return <RestaurantPOS />;
+  return <RetailPOSPage />;
+}
+
+function RetailPOSPage() {
   const { t, currencySymbol, profile } = useApp();
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);

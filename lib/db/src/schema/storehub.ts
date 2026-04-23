@@ -1,6 +1,6 @@
 import {
   pgTable, uuid, varchar, text, integer, boolean, timestamp,
-  doublePrecision, jsonb, index,
+  doublePrecision, jsonb, index, numeric,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth";
 
@@ -185,3 +185,56 @@ export const userIntegrations = pgTable("user_integrations", {
   byUser:       index("user_integrations_user_idx").on(t.userId),
   byUserSystem: index("user_integrations_user_system_idx").on(t.userId, t.systemId),
 }));
+
+// ── Restaurant: Ingredients ───────────────────────────────────────────────────
+export const ingredients = pgTable("ingredients", {
+  id:                uuid("id").primaryKey().defaultRandom(),
+  userId:            uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name:              varchar("name", { length: 255 }).notNull(),
+  unit:              varchar("unit", { length: 50 }).notNull().default("each"), // kg, g, L, mL, each, oz, lb
+  stockQuantity:     numeric("stock_quantity", { precision: 10, scale: 3 }).notNull().default("0"),
+  lowStockThreshold: numeric("low_stock_threshold", { precision: 10, scale: 3 }).notNull().default("0"),
+  costPerUnit:       numeric("cost_per_unit", { precision: 10, scale: 2 }).notNull().default("0"),
+  createdAt:         timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Restaurant: Recipes ───────────────────────────────────────────────────────
+export const recipes = pgTable("recipes", {
+  id:            uuid("id").primaryKey().defaultRandom(),
+  userId:        uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name:          varchar("name", { length: 255 }).notNull(),
+  description:   text("description"),
+  category:      varchar("category", { length: 100 }),
+  yieldQuantity: numeric("yield_quantity", { precision: 10, scale: 3 }).notNull().default("1"),
+  yieldUnit:     varchar("yield_unit", { length: 50 }).notNull().default("serving"),
+  createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Restaurant: Recipe Ingredients (junction) ─────────────────────────────────
+export const recipeIngredients = pgTable("recipe_ingredients", {
+  id:           uuid("id").primaryKey().defaultRandom(),
+  recipeId:     uuid("recipe_id").notNull().references(() => recipes.id, { onDelete: "cascade" }),
+  ingredientId: uuid("ingredient_id").notNull().references(() => ingredients.id, { onDelete: "cascade" }),
+  quantity:     numeric("quantity", { precision: 10, scale: 3 }).notNull(),
+});
+
+// ── Restaurant: Menu Items ────────────────────────────────────────────────────
+export const menuItems = pgTable("menu_items", {
+  id:          uuid("id").primaryKey().defaultRandom(),
+  userId:      uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name:        varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category:    varchar("category", { length: 100 }),
+  price:       numeric("price", { precision: 10, scale: 2 }).notNull(),
+  recipeId:    uuid("recipe_id").references(() => recipes.id, { onDelete: "set null" }),
+  available:   boolean("available").notNull().default(true),
+  createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Ingredient       = typeof ingredients.$inferSelect;
+export type InsertIngredient = typeof ingredients.$inferInsert;
+export type Recipe           = typeof recipes.$inferSelect;
+export type InsertRecipe     = typeof recipes.$inferInsert;
+export type RecipeIngredient = typeof recipeIngredients.$inferSelect;
+export type MenuItem         = typeof menuItems.$inferSelect;
+export type InsertMenuItem   = typeof menuItems.$inferInsert;
