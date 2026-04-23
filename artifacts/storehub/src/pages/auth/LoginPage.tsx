@@ -6,6 +6,30 @@ import { useAuth } from "../../contexts/AuthContext";
 import { authenticateWithBiometric, getBiometricEmail } from "../../services/biometricService";
 import { googleSignIn, logIn, socialLogin } from "../../services/authService";
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+
+// Isolated component so useGoogleLogin is only called when GoogleOAuthProvider exists.
+function GoogleButton({ onSuccess, onError, loading }: {
+  onSuccess: (token: string) => void;
+  onError: () => void;
+  loading: boolean;
+}) {
+  const trigger = useGoogleLogin({ onSuccess: (r) => onSuccess(r.access_token), onError });
+  return (
+    <button
+      type="button"
+      onClick={() => trigger()}
+      disabled={loading}
+      className="rounded-2xl border border-stone-200 bg-white/80 px-3 py-3 text-sm font-medium text-stone-700 transition hover:-translate-y-0.5 hover:bg-white disabled:opacity-50"
+    >
+      <div className="flex items-center justify-center gap-2">
+        {loading ? <Spinner /> : <SocialIcon provider="google" />}
+        <span>Google</span>
+      </div>
+    </button>
+  );
+}
+
 export default function LoginPage() {
   const { setUser } = useAuth();
   const [, navigate] = useLocation();
@@ -61,32 +85,26 @@ export default function LoginPage() {
     }
   }
 
-  const triggerGoogleLogin = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
-      setError(null);
-      setLoading("google");
-      try {
-        const { user, isNewUser } = await googleSignIn(tokenResponse.access_token);
-        setUser(user);
-        afterLogin(isNewUser);
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Google sign-in failed");
-      } finally {
-        setLoading(null);
-      }
-    },
-    onError: () => {
-      setError("Google sign-in was cancelled or failed. Please try again.");
+  async function handleGoogleSuccess(accessToken: string) {
+    setError(null);
+    setLoading("google");
+    try {
+      const { user, isNewUser } = await googleSignIn(accessToken);
+      setUser(user);
+      afterLogin(isNewUser);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed");
+    } finally {
       setLoading(null);
-    },
-  });
-
-  async function handleSocialLogin(provider: "google" | "apple" | "microsoft") {
-    if (provider === "google") {
-      setLoading("google");
-      triggerGoogleLogin();
-      return;
     }
+  }
+
+  function handleGoogleError() {
+    setError("Google sign-in was cancelled or failed. Please try again.");
+    setLoading(null);
+  }
+
+  async function handleSocialLogin(provider: "apple" | "microsoft") {
     setError(null);
     setLoading(provider);
     try {
@@ -150,7 +168,26 @@ export default function LoginPage() {
             </div>
 
             <div className="mt-6 grid grid-cols-3 gap-2">
-              {(["google", "apple", "microsoft"] as const).map((provider) => (
+              {GOOGLE_CLIENT_ID ? (
+                <GoogleButton
+                  onSuccess={handleGoogleSuccess}
+                  onError={handleGoogleError}
+                  loading={loading === "google"}
+                />
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  title="Google login not configured"
+                  className="rounded-2xl border border-stone-200 bg-white/80 px-3 py-3 text-sm font-medium text-stone-400 opacity-40 cursor-not-allowed"
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <SocialIcon provider="google" />
+                    <span>Google</span>
+                  </div>
+                </button>
+              )}
+              {(["apple", "microsoft"] as const).map((provider) => (
                 <button
                   key={provider}
                   type="button"
