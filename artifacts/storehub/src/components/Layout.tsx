@@ -82,10 +82,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     let programmatic = false;
 
     const animate = () => {
-      const lerp = Number.parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue("--scroll-lerp"),
-      );
-      current += (target - current) * (Number.isFinite(lerp) ? lerp : 0.14);
+      const lerp = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--scroll-lerp"));
+      const baseLerp = Number.isFinite(lerp) ? lerp : 0.14;
+      const distance = Math.abs(target - current);
+      const adaptiveLerp = Math.min(0.28, baseLerp + Math.min(0.09, distance / 2400));
+      current += (target - current) * adaptiveLerp;
       if (Math.abs(target - current) < 0.5) {
         current = target;
       }
@@ -105,7 +106,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
       event.preventDefault();
       const maxScroll = el.scrollHeight - el.clientHeight;
-      target = Math.max(0, Math.min(maxScroll, target + event.deltaY));
+      const modeScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? el.clientHeight : 1;
+      const weightedDelta = event.deltaY * modeScale * 0.9;
+      target = Math.max(0, Math.min(maxScroll, target + weightedDelta));
       if (!frame) {
         frame = window.requestAnimationFrame(animate);
       }
@@ -229,8 +232,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app-shell-bg flex min-h-screen">
-      <aside className="hidden w-[320px] shrink-0 border-r border-white/40 bg-white/35 md:block">
+    <div className="app-shell-bg flex h-screen overflow-hidden">
+      <aside className="hidden h-screen w-[320px] shrink-0 border-r border-white/40 bg-white/35 md:block">
         <SidebarContent />
       </aside>
 
@@ -249,7 +252,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 border-b border-white/40 bg-white/45 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-4 px-4 py-4 md:px-8">
             <div className="flex items-center gap-3">
@@ -272,7 +275,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6">
+        <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-4 md:px-8 md:py-6">
           <div className="page-reveal">{children}</div>
         </main>
       </div>

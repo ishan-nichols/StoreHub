@@ -11,13 +11,16 @@ import type { AuthUser } from "../services/authService";
 import { getMe, logOut, refreshSession } from "../services/authService";
 
 interface AuthContextValue {
-  user:            AuthUser | null;
-  isLoading:       boolean;
-  isAuthenticated: boolean;
-  isAdmin:         boolean;
-  setUser:         (user: AuthUser | null) => void;
-  logout:          () => Promise<void>;
-  recheckAuth:     () => Promise<void>;
+  user:             AuthUser | null;
+  isLoading:        boolean;
+  isAuthenticated:  boolean;
+  isAdmin:          boolean;
+  isBusinessOwner:  boolean;
+  isStoreOwner:     boolean;
+  businessId?:      string;
+  setUser:          (user: AuthUser | null) => void;
+  logout:           () => Promise<void>;
+  recheckAuth:      () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -82,6 +85,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated: !!user,
       isAdmin: user?.role === "superadmin",
+      isBusinessOwner: user?.role === "business_owner",
+      isStoreOwner: user?.role === "store_owner",
+      businessId: (user as any)?.businessId,
       setUser,
       logout,
       recheckAuth,

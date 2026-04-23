@@ -58,6 +58,9 @@ export interface UserProfile {
   goal?: string;
   lastUpdated?: string;
   uiPreferences?: UIPreferences;
+
+  // ── Business relationship ──────────────────────────────────────────────────
+  businessId?: string;
 }
 
 export type PosSyncStatus = "synced" | "pending" | "failed" | "not_connected";

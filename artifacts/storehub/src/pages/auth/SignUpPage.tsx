@@ -3,6 +3,7 @@ import { useLocation, Link } from "wouter";
 import { useAuth } from "../../contexts/AuthContext";
 import { signUp, getPasswordStrength } from "../../services/authService";
 import { Eye, EyeOff, Mail, Lock, User, AlertCircle, CheckCircle } from "lucide-react";
+import { AuthShell } from "../../components/page-shell";
 
 export default function SignUpPage() {
   const { setUser }    = useAuth();
@@ -62,19 +63,14 @@ export default function SignUpPage() {
 
   if (verifyEmail) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-sm text-center">
+      <AuthShell title="Check your inbox" subtitle={`We sent a verification link to ${email}.`}>
+        <div className="text-center">
           <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900 rounded-full flex items-center justify-center mx-auto mb-4">
             <Mail className="w-8 h-8 text-emerald-600" />
           </div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Check your inbox</h2>
-          <p className="text-gray-500 dark:text-gray-400 mt-2 text-sm">
-            We sent a verification link to <strong>{email}</strong>.
-            Click it to activate your account.
-          </p>
 
           {isDev && devToken && (
-            <div className="mt-5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-left">
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-left">
               <p className="text-xs font-mono text-amber-700 dark:text-amber-400 break-all mb-2">
                 [Dev] Token: {devToken}
               </p>
@@ -87,30 +83,14 @@ export default function SignUpPage() {
 
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-          <button
-            onClick={() => setVerifyEmail(false)}
-            className="mt-6 text-sm text-emerald-600 hover:text-emerald-700 font-medium"
-          >
-            Back to sign up
-          </button>
+          <button onClick={() => setVerifyEmail(false)} className="mt-6 text-sm font-medium text-amber-700 hover:text-amber-800">Back to sign up</button>
         </div>
-      </div>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center mb-7">
-          <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center shadow-lg mb-3">
-            <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M19 7H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2zm-9 8H7v-2h3v2zm0-4H7V9h3v2zm5 4h-3v-2h3v2zm0-4h-3V9h3v2zM7 3h10v2H7V3z"/>
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Create your account</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Free forever. No credit card needed.</p>
-        </div>
-
+    <AuthShell title="Create your account" subtitle="Free forever. No credit card needed.">
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="relative">
             <User className="absolute left-3.5 top-3.5 w-4 h-4 text-gray-400" />
@@ -184,9 +164,9 @@ export default function SignUpPage() {
           </div>
 
           {error && (
-            <div className="flex items-center gap-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl px-3 py-2.5">
+            <div className="flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2.5">
               <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-              <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
+              <span className="text-sm text-red-700">{error}</span>
             </div>
           )}
 
@@ -201,19 +181,18 @@ export default function SignUpPage() {
           </button>
         </form>
 
-        <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-3">
+        <p className="mt-3 text-center text-xs text-stone-400">
           By signing up, you agree to our{" "}
           <span className="underline cursor-pointer">Terms of Service</span> and{" "}
           <span className="underline cursor-pointer">Privacy Policy</span>.
         </p>
 
-        <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-5">
+        <p className="mt-5 text-center text-sm text-stone-500">
           Already have an account?{" "}
-          <Link to="/login" className="text-emerald-600 font-medium hover:text-emerald-700">
+          <Link to="/login" className="font-medium text-amber-700 hover:text-amber-800">
             Sign in
           </Link>
         </p>
-      </div>
-    </div>
+    </AuthShell>
   );
 }

@@ -36,6 +36,9 @@ import AdminStoresPage       from "./pages/admin/AdminStoresPage";
 import AdminStoreDetailPage  from "./pages/admin/AdminStoreDetailPage";
 import AdminCreateStorePage  from "./pages/admin/AdminCreateStorePage";
 
+// Business owner screens
+import BusinessOwnerApp from "./pages/business/BusinessOwnerApp";
+
 const queryClient = new QueryClient();
 
 // ─── Admin routing tree ───────────────────────────────────────────────────────
@@ -120,7 +123,7 @@ function StoreApp() {
 // ─── Root — branches on role ──────────────────────────────────────────────────
 
 function AppInner() {
-  const { user, isLoading, isAdmin } = useAuth();
+  const { user, isLoading, isAdmin, isBusinessOwner } = useAuth();
 
   if (isLoading) {
     return (
@@ -136,6 +139,11 @@ function AppInner() {
   // Superadmin: completely separate app, no store data loading
   if (isAdmin) {
     return <AdminApp />;
+  }
+
+  // Business owner: separate app for managing multiple stores
+  if (isBusinessOwner) {
+    return <BusinessOwnerApp />;
   }
 
   // Unauthenticated users trying to hit /admin — redirect to login

@@ -206,6 +206,7 @@
   }
   html {
     color-scheme: light;
+    scroll-behavior: smooth;
   }
   body {
     @apply font-sans antialiased bg-background text-foreground;
@@ -215,7 +216,8 @@
       radial-gradient(circle at 20% 80%, color-mix(in srgb, hsl(var(--primary)) calc(var(--ambient-strength) * 45%), white), transparent 20%),
       linear-gradient(180deg, #fffef9 0%, #f6f1e7 100%);
     min-height: 100vh;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 }
 

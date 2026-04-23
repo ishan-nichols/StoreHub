@@ -10,11 +10,14 @@ import { Check, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
 // ─── Step Sequence ────────────────────────────────────────────────────────────
 
 type StepKey =
-  | "businessType" | "location" | "storeSize" | "currentSystem" | "whichPos"
+  | "businessName" | "businessType" | "location" | "storeSize" | "currentSystem" | "whichPos"
   | "painPoints" | "stockOuts" | "supplierStyle" | "scheduleStyle"
   | "goal" | "storeName" | "storeTaxRate" | "posConnect" | "welcome";
 
 interface Answers {
+  businessName: string;
+  businessDescription: string;
+  businessWebsite: string;
   businessType: BusinessType;
   country: "US" | "MX" | "";
   stateCode: string;
@@ -38,6 +41,7 @@ interface Answers {
 function getStepSequence(answers: Partial<Answers>): StepKey[] {
   const hasPOS = answers.currentSystem === "pos" || answers.currentSystem === "multiple";
   return [
+    "businessName",
     "businessType",
     "location",
     "storeSize",
@@ -191,6 +195,7 @@ export default function OnboardingPage() {
   const [locationSearch, setLocationSearch] = useState("");
 
   const [answers, setAnswers] = useState<Answers>({
+    businessName: "", businessDescription: "", businessWebsite: "",
     businessType: "grocery", country: "", stateCode: "", stateName: "",
     storeSize: "small", currentSystem: "paper",
     currentPosSystem: "", painPoints: [], stockOuts: [],
@@ -207,7 +212,7 @@ export default function OnboardingPage() {
 
   const sequence    = getStepSequence(answers);
   const progressSeq = sequence.filter(s => s !== "welcome");
-  const progressIdx = progressSeq.indexOf(currentStep as StepKey);
+  const progressIdx = progressSeq.indexOf(currentStep as Exclude<StepKey, "welcome">);
   const progress    = currentStep === "welcome" ? 100 : (progressIdx / progressSeq.length) * 100;
 
   function setA<K extends keyof Answers>(key: K, value: Answers[K]) {
@@ -248,7 +253,7 @@ export default function OnboardingPage() {
     });
   }
 
-  function advanceFrom(step: StepKey, current: Answers) {
+  function advanceFrom(step: Exclude<StepKey, "welcome">, current: Answers) {
     const seq  = getStepSequence(current);
     const idx  = seq.indexOf(step);
     const next = seq[idx + 1];
@@ -263,49 +268,82 @@ export default function OnboardingPage() {
     const existingProducts = await getProducts();
     const isRetake = existingProducts.length > 0;
     const numEmps = a.storeSize === "solo" ? 0 : a.storeSize === "small" ? 3 : a.storeSize === "medium" ? 8 : 15;
-    const profile: UserProfile = {
-      id:               generateId(),
-      storeName:        a.storeName.trim(),
-      ownerName:        a.ownerName.trim(),
-      businessType:     a.businessType,
-      numEmployees:     numEmps,
-      painPoint:        a.painPoints.includes("employees") ? "employees" :
-                        a.painPoints.includes("profits")   ? "profits"   :
-                        a.painPoints.includes("reorder")   ? "inventory" : "sales",
-      currency:         a.currency,
-      currencySymbol:   getCurrencySymbol(a.currency),
-      language:         a.language,
-      theme:            "light" as Theme,
-      taxRate:          a.taxRate,
-      openingHours:     DEFAULT_HOURS,
-      preSeedData:      true,
-      createdAt:        new Date().toISOString(),
-      featureUsageCount: {},
-      onboardingCompleted: true,
-      onboardingVersion: 2,
-      storeSize:        a.storeSize,
-      currentSystem:    a.currentSystem,
-      currentPosSystem: a.currentPosSystem || undefined,
-      painPoints:       a.painPoints,
-      stockOuts:        a.stockOuts,
-      supplierStyle:    a.supplierStyle || undefined,
-      scheduleStyle:    a.scheduleStyle || undefined,
-      goal:             a.goal || undefined,
-      country:          (a.country as "US" | "MX") || undefined,
-      stateCode:        a.stateCode || undefined,
-      stateName:        a.stateName || undefined,
-      lastUpdated:      new Date().toISOString(),
-    };
-    // Save completion flag synchronously FIRST — before any async work.
-    // This is the single source of truth for startup routing.
-    localStorage.setItem("onboardingComplete", "true");
-    localStorage.setItem("userProfile", JSON.stringify(profile));
-    console.log("Onboarding saved");
-    // Now update React context state (async)
-    await setProfile(profile);
-    if (!isRetake) {
-      await bulkCreateProducts(getSeedProducts(a.businessType));
+
+    try {
+      // 1. Create business via API
+      const businessRes = await fetch("/api/onboarding/business", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          businessName: a.businessName.trim(),
+          businessDescription: a.businessDescription.trim() || null,
+          businessWebsite: a.businessWebsite.trim() || null,
+        }),
+        credentials: "include",
+      });
+
+      if (!businessRes.ok) {
+        const err = await businessRes.json();
+        throw new Error(err.error || "Failed to create business");
+      }
+
+      const { business } = await businessRes.json();
+
+      const profile: UserProfile = {
+        id:               generateId(),
+        storeName:        a.storeName.trim(),
+        ownerName:        a.ownerName.trim(),
+        businessType:     a.businessType,
+        numEmployees:     numEmps,
+        painPoint:        a.painPoints.includes("employees") ? "employees" :
+                          a.painPoints.includes("profits")   ? "profits"   :
+                          a.painPoints.includes("reorder")   ? "inventory" : "sales",
+        currency:         a.currency,
+        currencySymbol:   getCurrencySymbol(a.currency),
+        language:         a.language,
+        theme:            "light" as Theme,
+        taxRate:          a.taxRate,
+        openingHours:     DEFAULT_HOURS,
+        preSeedData:      true,
+        createdAt:        new Date().toISOString(),
+        featureUsageCount: {},
+        onboardingCompleted: true,
+        onboardingVersion: 2,
+        storeSize:        a.storeSize,
+        currentSystem:    a.currentSystem,
+        currentPosSystem: a.currentPosSystem || undefined,
+        painPoints:       a.painPoints,
+        stockOuts:        a.stockOuts,
+        supplierStyle:    a.supplierStyle || undefined,
+        scheduleStyle:    a.scheduleStyle || undefined,
+        goal:             a.goal || undefined,
+        country:          (a.country as "US" | "MX") || undefined,
+        stateCode:        a.stateCode || undefined,
+        stateName:        a.stateName || undefined,
+        lastUpdated:      new Date().toISOString(),
+        businessId:       business.id,
+      } as any;
+
+      // Save completion flag synchronously FIRST — before any async work.
+      // This is the single source of truth for startup routing.
+      localStorage.setItem("onboardingComplete", "true");
+      localStorage.setItem("userProfile", JSON.stringify(profile));
+      console.log("Onboarding saved with business:", business.id);
+
+      // Now update React context state (async)
+      await setProfile(profile);
+
+      if (!isRetake) {
+        await bulkCreateProducts(getSeedProducts(a.businessType));
+      }
+    } catch (error) {
+      console.error("Onboarding failed:", error);
+      alert((error as Error).message || "Failed to complete onboarding");
+      savingRef.current = false;
+      setIsSaving(false);
+      return;
     }
+
     setIsSaving(false);
   }
 
@@ -324,16 +362,19 @@ export default function OnboardingPage() {
   const posName     = POS_SYSTEMS.find(p => p.value === answers.currentPosSystem)?.label ?? "your POS";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 flex flex-col">
+    <div className="relative min-h-screen overflow-hidden bg-[#f7f1e7]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.95),_transparent_28%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.16),_transparent_24%),linear-gradient(180deg,_#fbf7f1_0%,_#efe6d8_100%)]" />
+      <div className="premium-grid absolute inset-0 opacity-35" />
       <style>{`
         @keyframes ob-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
         .ob-step { animation: ob-in 0.26s cubic-bezier(0.22,1,0.36,1); }
       `}</style>
+      <div className="relative flex min-h-screen flex-col">
 
       {/* Top bar */}
       <div className="shrink-0 px-5 pt-5 pb-3">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-xl font-bold text-amber-600 tracking-tight">StoreHub</div>
+          <div className="text-xl font-bold text-stone-950 tracking-tight">StoreHub</div>
           {stepHistory.length > 1 && currentStep !== "welcome" && (
             <button onClick={goBack} className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 transition-colors">
               <ChevronLeft size={16} /> Back
@@ -358,7 +399,59 @@ export default function OnboardingPage() {
       <div className="flex-1 flex items-start justify-center px-4 pb-10 pt-2 overflow-y-auto">
         <div className="w-full max-w-lg">
           {visible && (
-            <div key={currentStep} className="ob-step">
+            <div key={currentStep} className="glass-panel ob-step rounded-[32px] p-5 md:p-6">
+
+              {/* Step 0: Business Name (NEW) */}
+              {currentStep === "businessName" && (
+                <Step question="What's your business name?" sub="This will appear on your dashboard and reports.">
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      placeholder="e.g., Acme Grocery"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-500 focus:outline-none"
+                      value={answers.businessName}
+                      onChange={(e) => setA("businessName", e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && answers.businessName.trim()) {
+                          const seq = getStepSequence(answers);
+                          const idx = seq.indexOf(currentStep);
+                          const next = seq[idx + 1];
+                          if (next) animateTo(next);
+                        }
+                      }}
+                      autoFocus
+                    />
+                    <textarea
+                      placeholder="(Optional) Business description"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-500 focus:outline-none"
+                      rows={2}
+                      value={answers.businessDescription}
+                      onChange={(e) => setA("businessDescription", e.target.value)}
+                    />
+                    <input
+                      type="url"
+                      placeholder="(Optional) Website"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-500 focus:outline-none"
+                      value={answers.businessWebsite}
+                      onChange={(e) => setA("businessWebsite", e.target.value)}
+                    />
+                    <button
+                      onClick={() => {
+                        if (answers.businessName.trim()) {
+                          const seq = getStepSequence(answers);
+                          const idx = seq.indexOf(currentStep);
+                          const next = seq[idx + 1];
+                          if (next) animateTo(next);
+                        }
+                      }}
+                      disabled={!answers.businessName.trim()}
+                      className="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </Step>
+              )}
 
               {/* Step 1: Business Type */}
               {currentStep === "businessType" && (
@@ -785,6 +878,7 @@ export default function OnboardingPage() {
           )}
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -795,8 +889,8 @@ function Step({ question, sub, children }: { question: string; sub?: string; chi
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 leading-snug">{question}</h2>
-        {sub && <p className="text-gray-400 mt-1.5 text-sm leading-relaxed">{sub}</p>}
+        <h2 className="text-3xl font-semibold tracking-[-0.04em] text-stone-950 leading-snug">{question}</h2>
+        {sub && <p className="text-stone-500 mt-1.5 text-sm leading-relaxed">{sub}</p>}
       </div>
       {children}
     </div>
@@ -809,14 +903,14 @@ function ChoiceBtn({ selected, onClick, emoji, label, desc, wide }: {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-3 px-4 py-4 rounded-2xl border-2 text-left transition-all active:scale-95 bg-white ${
-        selected ? "border-amber-500 bg-amber-50" : "border-gray-200 hover:border-amber-300 hover:bg-amber-50/50"
+      className={`flex items-center gap-3 px-4 py-4 rounded-[24px] border text-left transition-all active:scale-[0.99] bg-white ${
+        selected ? "border-amber-300 bg-amber-50" : "border-stone-200 hover:border-amber-300 hover:bg-[#fcfbf8]"
       } ${wide ? "w-full" : ""}`}
     >
       <span className="text-2xl shrink-0">{emoji}</span>
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold text-gray-800">{label}</div>
-        {desc && <div className="text-xs text-gray-400 mt-0.5">{desc}</div>}
+        <div className="text-sm font-semibold text-stone-900">{label}</div>
+        {desc && <div className="text-xs text-stone-400 mt-0.5">{desc}</div>}
       </div>
       {selected && <Check size={16} className="text-amber-500 shrink-0" />}
     </button>
@@ -829,13 +923,13 @@ function MultiBtn({ selected, onClick, emoji, label }: {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-3 px-4 py-3.5 rounded-2xl border-2 text-left transition-all active:scale-95 w-full ${
-        selected ? "border-amber-500 bg-amber-50" : "border-gray-200 bg-white hover:border-amber-300 hover:bg-amber-50/50"
+      className={`flex items-center gap-3 px-4 py-3.5 rounded-[24px] border text-left transition-all active:scale-[0.99] w-full ${
+        selected ? "border-amber-300 bg-amber-50" : "border-stone-200 bg-white hover:border-amber-300 hover:bg-[#fcfbf8]"
       }`}
     >
       <span className="text-xl shrink-0">{emoji}</span>
-      <span className={`text-sm font-semibold flex-1 ${selected ? "text-amber-800" : "text-gray-800"}`}>{label}</span>
-      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${selected ? "border-amber-500 bg-amber-500" : "border-gray-300"}`}>
+      <span className={`text-sm font-semibold flex-1 ${selected ? "text-amber-800" : "text-stone-900"}`}>{label}</span>
+      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${selected ? "border-amber-500 bg-amber-500" : "border-stone-300"}`}>
         {selected && <Check size={11} className="text-white" />}
       </div>
     </button>

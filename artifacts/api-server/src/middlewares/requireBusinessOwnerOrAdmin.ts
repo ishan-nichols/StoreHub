@@ -4,7 +4,7 @@ import { db } from "@storehub/db";
 import { users } from "@storehub/db/schema";
 import { eq } from "drizzle-orm";
 
-export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function requireBusinessOwnerOrAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   const accessToken = req.cookies?.sh_access as string | undefined;
   if (!accessToken) {
     res.status(401).json({ error: "Not authenticated" });
@@ -15,6 +15,13 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     res.status(401).json({ error: "Session expired" });
     return;
   }
+
+  // Check if user is superadmin or business_owner
+  if (!["superadmin", "business_owner"].includes(payload.role)) {
+    res.status(403).json({ error: "Business owner or admin access required" });
+    return;
+  }
+
   req.userId = payload.userId;
   req.userRole = payload.role;
 

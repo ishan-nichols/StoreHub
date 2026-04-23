@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "wouter";
 import { forgotPassword } from "../../services/authService";
 import { Mail, ArrowLeft, AlertCircle, CheckCircle } from "lucide-react";
+import { AuthShell } from "../../components/page-shell";
 
 export default function ForgotPasswordPage() {
   const [email,   setEmail]   = useState("");
@@ -24,8 +25,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+    <AuthShell title="Forgot your password?" subtitle="Enter your email and we'll send a reset link.">
         <Link to="/login" className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-6">
           <ArrowLeft className="w-4 h-4" />
           Back to sign in
@@ -33,13 +33,6 @@ export default function ForgotPasswordPage() {
 
         {!sent ? (
           <>
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Forgot your password?</h1>
-              <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-                Enter your email address and we'll send you a reset link.
-              </p>
-            </div>
-
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="relative">
                 <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-gray-400" />
@@ -55,9 +48,9 @@ export default function ForgotPasswordPage() {
               </div>
 
               {error && (
-                <div className="flex items-center gap-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl px-3 py-2.5">
+                <div className="flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2.5">
                   <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                  <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
+                  <span className="text-sm text-red-700">{error}</span>
                 </div>
               )}
 
@@ -73,24 +66,20 @@ export default function ForgotPasswordPage() {
             </form>
           </>
         ) : (
-          <div className="text-center">
-            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900 rounded-full flex items-center justify-center mx-auto mb-4">
-              <CheckCircle className="w-8 h-8 text-emerald-600" />
-            </div>
+            <div className="text-center">
+              <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle className="w-8 h-8 text-emerald-600" />
+              </div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">Check your email</h2>
             <p className="text-gray-500 dark:text-gray-400 mt-2 text-sm">
               If an account with <strong>{email}</strong> exists, you'll receive a reset link shortly.
               Check your spam folder if you don't see it.
             </p>
-            <button
-              onClick={() => { setEmail(""); setSent(false); }}
-              className="mt-5 text-sm text-emerald-600 hover:text-emerald-700 font-medium"
-            >
+              <button onClick={() => { setEmail(""); setSent(false); }} className="mt-5 text-sm font-medium text-amber-700 hover:text-amber-800">
               Try another email
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </AuthShell>
   );
 }

@@ -6,9 +6,30 @@ import { users } from "./auth";
 
 const userRef = () => uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" });
 
+// ─── Businesses ─────────────────────────────────────────────────────────────
+export const businesses = pgTable(
+  "businesses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    businessOwnerId: uuid("business_owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    website: varchar("website", { length: 255 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => ({
+    businessOwnerIdIdx: index("businesses_business_owner_id_idx").on(table.businessOwnerId),
+  })
+);
+
 // ─── Profile ────────────────────────────────────────────────────────────────
 export const storeProfiles = pgTable("store_profiles", {
   userId:              uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  businessId:          uuid("business_id").references(() => businesses.id, { onDelete: "cascade" }),
   storeName:           varchar("store_name",      { length: 255 }).notNull().default(""),
   ownerName:           varchar("owner_name",      { length: 255 }).notNull().default(""),
   businessType:        varchar("business_type",   { length: 50 }).notNull().default("other"),
@@ -43,7 +64,9 @@ export const storeProfiles = pgTable("store_profiles", {
   storageMode:         varchar("storage_mode",     { length: 20 }).notNull().default("cloud"), // 'cloud' | 'local'
   createdAt:           timestamp("created_at",     { withTimezone: true }).notNull().defaultNow(),
   lastUpdated:         timestamp("last_updated",   { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  businessIdIdx: index("store_profiles_business_id_idx").on(table.businessId),
+}));
 
 // ─── Suppliers ──────────────────────────────────────────────────────────────
 export const suppliers = pgTable("suppliers", {

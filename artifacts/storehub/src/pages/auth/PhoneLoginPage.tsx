@@ -3,6 +3,7 @@ import { useLocation, Link } from "wouter";
 import { useAuth } from "../../contexts/AuthContext";
 import { sendOTP, verifyOTP, COUNTRY_CODES, formatPhoneNumber, fullPhoneNumber } from "../../services/phoneAuthService";
 import { ArrowLeft, Phone, AlertCircle, ChevronDown } from "lucide-react";
+import { AuthShell } from "../../components/page-shell";
 
 type Step = "phone" | "otp";
 
@@ -103,8 +104,7 @@ export default function PhoneLoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+    <AuthShell title={step === "phone" ? "Sign in with phone" : "Enter your code"} subtitle={step === "phone" ? "We'll send you a one-time code." : `We sent a 6-digit code to ${maskedPhone || "your phone"}.`}>
         <Link to="/login"
           className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 mb-6">
           <ArrowLeft className="w-4 h-4" />
@@ -113,11 +113,6 @@ export default function PhoneLoginPage() {
 
         {step === "phone" && (
           <>
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Sign in with phone</h1>
-              <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">We'll send you a one-time code.</p>
-            </div>
-
             <form onSubmit={handleSendOTP} className="space-y-3">
               <div className="flex gap-2">
                 <div className="relative">
@@ -160,9 +155,9 @@ export default function PhoneLoginPage() {
               </div>
 
               {error && (
-                <div className="flex items-center gap-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl px-3 py-2.5">
+                <div className="flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2.5">
                   <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                  <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
+                  <span className="text-sm text-red-700">{error}</span>
                 </div>
               )}
 
@@ -176,15 +171,8 @@ export default function PhoneLoginPage() {
 
         {step === "otp" && (
           <>
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Enter your code</h1>
-              <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-                We sent a 6-digit code to <strong>{maskedPhone}</strong>
-              </p>
-            </div>
-
             {isDev && devOtp && (
-              <div className="mb-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+              <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2">
                 <p className="text-xs text-amber-700 dark:text-amber-400">[Dev] Code: <strong>{devOtp}</strong></p>
               </div>
             )}
@@ -208,11 +196,11 @@ export default function PhoneLoginPage() {
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl px-3 py-2.5 mb-3">
-                <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
-              </div>
-            )}
+                <div className="mb-3 flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-3 py-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  <span className="text-sm text-red-700">{error}</span>
+                </div>
+              )}
 
             {loading && (
               <div className="flex justify-center mb-3">
@@ -236,7 +224,6 @@ export default function PhoneLoginPage() {
             </div>
           </>
         )}
-      </div>
-    </div>
+    </AuthShell>
   );
 }

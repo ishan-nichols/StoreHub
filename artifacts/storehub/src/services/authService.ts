@@ -20,6 +20,7 @@ export interface AuthUser {
   emailVerified: boolean;
   phoneNumber:   string | null;
   role:          string;
+  businessId?:   string;
   createdAt:     string;
   lastLoginAt:   string | null;
 }
