@@ -4,17 +4,21 @@ import { useApp } from "../contexts/useApp";
 import type { UserProfile, BusinessType, Language, Theme, StoreSize, CurrentSystem, OpeningHours } from "../schemas";
 import { generateId, getCurrencySymbol } from "../utils";
 import { bulkCreateProducts, getSeedProducts, getProducts } from "../services/dataService";
+import { TAX_REGIONS, US_REGIONS, MX_REGIONS, getRegion } from "../data/taxData";
 import { Check, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
 
 // ─── Step Sequence ────────────────────────────────────────────────────────────
 
 type StepKey =
-  | "businessType" | "storeSize" | "currentSystem" | "whichPos"
+  | "businessType" | "location" | "storeSize" | "currentSystem" | "whichPos"
   | "painPoints" | "stockOuts" | "supplierStyle" | "scheduleStyle"
   | "goal" | "storeName" | "storeTaxRate" | "posConnect" | "welcome";
 
 interface Answers {
   businessType: BusinessType;
+  country: "US" | "MX" | "";
+  stateCode: string;
+  stateName: string;
   storeSize: StoreSize;
   currentSystem: CurrentSystem;
   currentPosSystem: string;
@@ -35,6 +39,7 @@ function getStepSequence(answers: Partial<Answers>): StepKey[] {
   const hasPOS = answers.currentSystem === "pos" || answers.currentSystem === "multiple";
   return [
     "businessType",
+    "location",
     "storeSize",
     "currentSystem",
     ...(hasPOS ? ["whichPos" as StepKey] : []),
@@ -183,8 +188,11 @@ export default function OnboardingPage() {
   const { setProfile } = useApp();
   const [, setLocation] = useLocation();
 
+  const [locationSearch, setLocationSearch] = useState("");
+
   const [answers, setAnswers] = useState<Answers>({
-    businessType: "grocery", storeSize: "small", currentSystem: "paper",
+    businessType: "grocery", country: "", stateCode: "", stateName: "",
+    storeSize: "small", currentSystem: "paper",
     currentPosSystem: "", painPoints: [], stockOuts: [],
     supplierStyle: "", scheduleStyle: "", goal: "",
     storeName: "", ownerName: "", posConnect: "",
@@ -283,6 +291,9 @@ export default function OnboardingPage() {
       supplierStyle:    a.supplierStyle || undefined,
       scheduleStyle:    a.scheduleStyle || undefined,
       goal:             a.goal || undefined,
+      country:          (a.country as "US" | "MX") || undefined,
+      stateCode:        a.stateCode || undefined,
+      stateName:        a.stateName || undefined,
       lastUpdated:      new Date().toISOString(),
     };
     // Save completion flag synchronously FIRST — before any async work.
@@ -356,6 +367,119 @@ export default function OnboardingPage() {
                     {BUSINESS_TYPES.map(bt => (
                       <ChoiceBtn key={bt.value} selected={false} onClick={() => pickSingle("businessType", bt.value)} emoji={bt.emoji} label={bt.label} />
                     ))}
+                  </div>
+                </Step>
+              )}
+
+              {/* Step: Location */}
+              {currentStep === "location" && (
+                <Step
+                  question={answers.language === "es" ? "¿Dónde está tu tienda?" : "Where is your store located?"}
+                  sub={answers.language === "es" ? "Usamos esto para aplicar el impuesto correcto y el salario mínimo." : "We use this to apply the correct tax rate and minimum wage."}
+                >
+                  <div className="space-y-4">
+                    {/* Country toggle */}
+                    <div className="grid grid-cols-2 gap-3">
+                      {([
+                        { value: "US" as const, flag: "🇺🇸", label: "United States" },
+                        { value: "MX" as const, flag: "🇲🇽", label: "México" },
+                      ]).map(c => (
+                        <button
+                          key={c.value}
+                          onClick={() => {
+                            setAnswers(prev => ({ ...prev, country: c.value, stateCode: "", stateName: "" }));
+                            setLocationSearch("");
+                          }}
+                          className={`flex flex-col items-center gap-2 py-5 rounded-2xl border-2 text-sm font-semibold transition-all ${
+                            answers.country === c.value
+                              ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                              : "border-gray-200 bg-white text-gray-700 hover:border-emerald-300 hover:bg-emerald-50/50"
+                          }`}
+                        >
+                          <span className="text-3xl">{c.flag}</span>
+                          <span>{c.label}</span>
+                          {answers.country === c.value && <Check size={14} className="text-emerald-500" />}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* State/Region picker */}
+                    {answers.country && (
+                      <div className="space-y-2">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={locationSearch}
+                          onChange={e => setLocationSearch(e.target.value)}
+                          placeholder={answers.country === "MX" ? "Buscar estado…" : "Search state…"}
+                          className="w-full border-2 border-gray-200 focus:border-amber-400 rounded-2xl px-4 py-3 text-sm focus:outline-none transition-colors bg-white"
+                        />
+                        <div className="max-h-52 overflow-y-auto rounded-2xl border border-gray-200 bg-white divide-y divide-gray-50">
+                          {(answers.country === "US" ? US_REGIONS : MX_REGIONS)
+                            .filter(r => r.stateName.toLowerCase().includes(locationSearch.toLowerCase()) || r.stateCode.toLowerCase().includes(locationSearch.toLowerCase()))
+                            .map(region => (
+                              <button
+                                key={region.code}
+                                onClick={() => {
+                                  setAnswers(prev => ({
+                                    ...prev,
+                                    stateCode: region.stateCode,
+                                    stateName: region.stateName,
+                                    currency:  region.currency,
+                                    taxRate:   parseFloat((region.salesTaxRate * 100).toFixed(4)),
+                                  }));
+                                }}
+                                className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                                  answers.stateCode === region.stateCode
+                                    ? "bg-emerald-50 text-emerald-700 font-semibold"
+                                    : "text-gray-700 hover:bg-gray-50"
+                                }`}
+                              >
+                                <span className="font-medium">{region.stateName}</span>
+                                <span className="ml-2 text-xs text-gray-400">{(region.salesTaxRate * 100).toFixed(region.salesTaxRate === 0 ? 0 : 2)}%</span>
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Summary card */}
+                    {answers.stateCode && answers.country && (() => {
+                      const region = getRegion(`${answers.country}-${answers.stateCode}`);
+                      if (!region) return null;
+                      return (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-sm space-y-1">
+                          <div className="font-bold text-emerald-800">{region.stateName}</div>
+                          {answers.country === "US" ? (
+                            <>
+                              <div className="text-emerald-700">Sales tax: <strong>{(region.salesTaxRate * 100).toFixed(region.salesTaxRate === 0 ? 0 : 2)}%</strong> · Min wage: <strong>${region.minimumWageHourly?.toFixed(2)}/hr</strong></div>
+                              <div className="text-emerald-600 text-xs">{region.incomeTaxNote}</div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="text-emerald-700">IVA: <strong>{(region.salesTaxRate * 100).toFixed(0)}%</strong> · Salario mínimo: <strong>${region.minimumWageDailyMXN?.toFixed(2)} MXN/día</strong></div>
+                              <div className="text-emerald-600 text-xs">{region.incomeTaxNote}</div>
+                            </>
+                          )}
+                          {region.specialNotes && <div className="text-gray-500 text-xs italic">{region.specialNotes}</div>}
+                        </div>
+                      );
+                    })()}
+
+                    <button
+                      disabled={!answers.country || !answers.stateCode}
+                      onClick={() => advanceFrom("location", answers)}
+                      className="w-full flex items-center justify-center gap-2 py-4 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-2xl text-base transition-colors"
+                    >
+                      Continue <ChevronRight size={18} />
+                    </button>
+
+                    <button
+                      onClick={() => advanceFrom("location", answers)}
+                      className="w-full text-center text-xs text-gray-400 hover:text-gray-600 transition-colors py-1"
+                    >
+                      Skip for now
+                    </button>
                   </div>
                 </Step>
               )}

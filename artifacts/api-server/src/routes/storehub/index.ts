@@ -1,10 +1,11 @@
 import { Router, type IRouter } from "express";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, gte, lte, sum } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   storeProfiles, products, sales, expenses, suppliers,
   employees, shifts, recurringExpenses, scheduledPriceChanges,
   ingredients, recipes, recipeIngredients, menuItems,
+  dailyPayRecords,
 } from "@workspace/db";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import { buildCrudRouter } from "./crud.js";
@@ -43,14 +44,15 @@ profileRouter.put("/", async (req, res) => {
 router.use("/profile", profileRouter);
 
 // ─── Standard per-user collections via factory ─────────────────────────────
-router.use("/products",          buildCrudRouter({ table: products,              userIdCol: products.userId,              idCol: products.id,              orderByCol: products.createdAt }));
-router.use("/sales",             buildCrudRouter({ table: sales,                 userIdCol: sales.userId,                 idCol: sales.id,                 orderByCol: sales.createdAt }));
-router.use("/expenses",          buildCrudRouter({ table: expenses,              userIdCol: expenses.userId,              idCol: expenses.id,              orderByCol: expenses.date }));
-router.use("/suppliers",         buildCrudRouter({ table: suppliers,             userIdCol: suppliers.userId,             idCol: suppliers.id,             orderByCol: suppliers.createdAt }));
-router.use("/employees",         buildCrudRouter({ table: employees,             userIdCol: employees.userId,             idCol: employees.id,             orderByCol: employees.createdAt }));
-router.use("/shifts",            buildCrudRouter({ table: shifts,                userIdCol: shifts.userId,                idCol: shifts.id,                orderByCol: shifts.shiftStart }));
-router.use("/recurring-expenses",buildCrudRouter({ table: recurringExpenses,     userIdCol: recurringExpenses.userId,     idCol: recurringExpenses.id,     orderByCol: recurringExpenses.createdAt }));
-router.use("/scheduled-prices",  buildCrudRouter({ table: scheduledPriceChanges, userIdCol: scheduledPriceChanges.userId, idCol: scheduledPriceChanges.id, orderByCol: scheduledPriceChanges.createdAt }));
+router.use("/products",           buildCrudRouter({ table: products,              userIdCol: products.userId,              idCol: products.id,              orderByCol: products.createdAt }));
+router.use("/sales",              buildCrudRouter({ table: sales,                 userIdCol: sales.userId,                 idCol: sales.id,                 orderByCol: sales.createdAt }));
+router.use("/expenses",           buildCrudRouter({ table: expenses,              userIdCol: expenses.userId,              idCol: expenses.id,              orderByCol: expenses.date }));
+router.use("/suppliers",          buildCrudRouter({ table: suppliers,             userIdCol: suppliers.userId,             idCol: suppliers.id,             orderByCol: suppliers.createdAt }));
+router.use("/employees",          buildCrudRouter({ table: employees,             userIdCol: employees.userId,             idCol: employees.id,             orderByCol: employees.createdAt }));
+router.use("/shifts",             buildCrudRouter({ table: shifts,                userIdCol: shifts.userId,                idCol: shifts.id,                orderByCol: shifts.shiftStart }));
+router.use("/recurring-expenses", buildCrudRouter({ table: recurringExpenses,     userIdCol: recurringExpenses.userId,     idCol: recurringExpenses.id,     orderByCol: recurringExpenses.createdAt }));
+router.use("/scheduled-prices",   buildCrudRouter({ table: scheduledPriceChanges, userIdCol: scheduledPriceChanges.userId, idCol: scheduledPriceChanges.id, orderByCol: scheduledPriceChanges.createdAt }));
+router.use("/daily-pay-records",  buildCrudRouter({ table: dailyPayRecords,       userIdCol: dailyPayRecords.userId,       idCol: dailyPayRecords.id,       orderByCol: dailyPayRecords.createdAt }));
 
 // ─── Replace entire collection (atomic per-table sync) ────────────────────
 const COLLECTION_TABLES: Record<string, { table: any; userIdCol: any }> = {
@@ -436,6 +438,119 @@ router.post("/menu/sell", requireAuth, async (req, res) => {
     });
 
     res.status(201).json(result);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// ─── Payroll report ────────────────────────────────────────────────────────
+router.get("/payroll/report", requireAuth, async (req, res) => {
+  const { start, end } = req.query as { start?: string; end?: string };
+  const userId = req.userId!;
+
+  try {
+    // Load all employees for this user
+    const emps = await db.select().from(employees).where(eq(employees.userId, userId));
+
+    // Load shifts in date range (for hourly employees)
+    const shiftsQuery = db.select().from(shifts).where(
+      and(
+        eq(shifts.userId, userId),
+        start ? gte(shifts.shiftStart, new Date(start)) : undefined,
+        end   ? lte(shifts.shiftStart, new Date(end + "T23:59:59Z")) : undefined,
+      )
+    );
+    const shiftsInRange = await shiftsQuery;
+
+    // Load daily_pay_records in date range (for daily/salary employees)
+    const dailyQuery = db.select().from(dailyPayRecords).where(
+      and(
+        eq(dailyPayRecords.userId, userId),
+        start ? gte(dailyPayRecords.workDate, start) : undefined,
+        end   ? lte(dailyPayRecords.workDate, end)   : undefined,
+      )
+    );
+    const dailyInRange = await dailyQuery;
+
+    const report = emps.map((emp) => {
+      const empPayrollType = emp.payrollType ?? "hourly";
+      if (empPayrollType === "hourly") {
+        const empShifts = shiftsInRange.filter((s) => s.employeeId === emp.id && s.hoursWorked !== null);
+        const hoursWorked = empShifts.reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
+        const estimatedPay = hoursWorked * (emp.hourlyWage ?? 0);
+        return {
+          employee: { id: emp.id, name: emp.name, role: emp.role, payrollType: empPayrollType },
+          hoursWorked,
+          estimatedPay,
+          shifts: empShifts,
+        };
+      } else {
+        const empDailyRecords = dailyInRange.filter((d) => d.employeeId === emp.id);
+        const estimatedPay = empDailyRecords.reduce((sum, d) => sum + parseFloat(d.totalPay as string), 0);
+        return {
+          employee: { id: emp.id, name: emp.name, role: emp.role, payrollType: empPayrollType },
+          estimatedPay,
+          dailyRecords: empDailyRecords,
+        };
+      }
+    });
+
+    res.json(report);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// ─── Tax summary ────────────────────────────────────────────────────────────
+router.get("/tax-summary", requireAuth, async (req, res) => {
+  const userId = req.userId!;
+
+  try {
+    const [profile] = await db.select().from(storeProfiles).where(eq(storeProfiles.userId, userId));
+    if (!profile) { res.status(404).json({ error: "Profile not found" }); return; }
+
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const yearStart  = new Date(now.getFullYear(), 0, 1).toISOString();
+    const todayEnd   = now.toISOString();
+
+    // Current month totals
+    const [monthSales] = await db.select({ total: sum(sales.total) }).from(sales)
+      .where(and(eq(sales.userId, userId), gte(sales.createdAt, new Date(monthStart)), lte(sales.createdAt, new Date(todayEnd))));
+    const [monthExpenses] = await db.select({ total: sum(expenses.amount) }).from(expenses)
+      .where(and(eq(expenses.userId, userId), gte(expenses.date, new Date(monthStart)), lte(expenses.date, new Date(todayEnd))));
+
+    // Year to date totals
+    const [ytdSales] = await db.select({ total: sum(sales.total) }).from(sales)
+      .where(and(eq(sales.userId, userId), gte(sales.createdAt, new Date(yearStart)), lte(sales.createdAt, new Date(todayEnd))));
+    const [ytdExpenses] = await db.select({ total: sum(expenses.amount) }).from(expenses)
+      .where(and(eq(expenses.userId, userId), gte(expenses.date, new Date(yearStart)), lte(expenses.date, new Date(todayEnd))));
+
+    const taxRate = profile.taxRate ?? 0;
+
+    const monthSalesTotal    = parseFloat(monthSales?.total as string ?? "0") || 0;
+    const monthExpenseTotal  = parseFloat(monthExpenses?.total as string ?? "0") || 0;
+    const ytdSalesTotal      = parseFloat(ytdSales?.total as string ?? "0") || 0;
+    const ytdExpenseTotal    = parseFloat(ytdExpenses?.total as string ?? "0") || 0;
+
+    res.json({
+      profile: {
+        country:   profile.country,
+        stateCode: profile.stateCode,
+        taxRate,
+        currency:  profile.currency,
+      },
+      currentMonth: {
+        totalSales:    monthSalesTotal,
+        taxCollected:  monthSalesTotal * taxRate,
+        totalExpenses: monthExpenseTotal,
+      },
+      ytd: {
+        totalSales:    ytdSalesTotal,
+        taxCollected:  ytdSalesTotal * taxRate,
+        totalExpenses: ytdExpenseTotal,
+      },
+    });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }

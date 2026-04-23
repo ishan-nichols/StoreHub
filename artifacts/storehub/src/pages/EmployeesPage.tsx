@@ -6,15 +6,16 @@ import {
   deleteEmployee,
   getShifts,
   createShift,
-  updateShift,
   getActiveShift,
   clockIn,
   clockOut,
+  createDailyPayRecord,
+  getPayrollReport,
 } from "../services/dataService";
-import type { Employee, Shift, InsertEmployee, InsertShift } from "../schemas";
+import type { Employee, Shift, InsertEmployee, InsertShift, DailyPayRecord, PayrollReportEntry } from "../schemas";
 import { formatDate, formatTime, calcHoursWorked, now, getCurrencySymbol } from "../utils";
 import CurrencyInput from "../components/CurrencyInput";
-import { Plus, Trash2, X, Clock, UserPlus, LogIn, LogOut, Timer } from "lucide-react";
+import { Plus, Trash2, X, Clock, UserPlus, LogIn, LogOut, Timer, Calendar, BarChart2 } from "lucide-react";
 
 function formatElapsed(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -39,24 +40,38 @@ function useClockTimer(shiftStart: string | null) {
   return elapsed;
 }
 
+const PAYROLL_TYPE_LABELS: Record<string, string> = {
+  hourly: "Hourly",
+  daily:  "Daily",
+  salary: "Salary",
+};
+
+const PAYROLL_TYPE_COLORS: Record<string, string> = {
+  hourly: "bg-amber-100 text-amber-700",
+  daily:  "bg-blue-100 text-blue-700",
+  salary: "bg-purple-100 text-purple-700",
+};
+
 interface EmployeeCardProps {
   emp: Employee;
   shifts: Shift[];
   currencySymbol: string;
   onLogShift: (emp: Employee) => void;
+  onRecordDay: (emp: Employee) => void;
   onDelete: (id: string) => void;
   onClockIn: (emp: Employee) => void;
   onClockOut: (shiftId: string) => void;
 }
 
-function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onDelete, onClockIn, onClockOut }: EmployeeCardProps) {
-  const activeShift = shifts.find((s) => s.employeeId === emp.id && s.shiftEnd === null);
+function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onRecordDay, onDelete, onClockIn, onClockOut }: EmployeeCardProps) {
+  const payrollType = emp.payrollType ?? "hourly";
+  const activeShift = payrollType === "hourly" ? shifts.find((s) => s.employeeId === emp.id && s.shiftEnd === null) : undefined;
   const elapsed = useClockTimer(activeShift?.shiftStart ?? null);
   const empShifts = shifts.filter((s) => s.employeeId === emp.id && s.shiftEnd !== null).slice(0, 5);
   const totalHours = shifts
     .filter((s) => s.employeeId === emp.id && s.hoursWorked !== null)
     .reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
-  const weeklyPay = emp.hourlyWage > 0 ? (totalHours * emp.hourlyWage).toFixed(2) : null;
+  const weeklyPay = payrollType === "hourly" && emp.hourlyWage > 0 ? (totalHours * emp.hourlyWage).toFixed(2) : null;
 
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-2xl border-2 p-5 transition-all ${activeShift ? "border-green-300 dark:border-green-700 shadow-green-50 dark:shadow-none shadow-lg" : "border-gray-100 dark:border-gray-700"}`}>
@@ -66,8 +81,11 @@ function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onDelete, onClo
             {emp.name.slice(0, 2).toUpperCase()}
           </div>
           <div>
-            <div className="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+            <div className="font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2 flex-wrap">
               {emp.name}
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PAYROLL_TYPE_COLORS[payrollType]}`}>
+                {PAYROLL_TYPE_LABELS[payrollType]}
+              </span>
               {activeShift && (
                 <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">
                   <Timer size={10} /> Clocked In
@@ -76,24 +94,41 @@ function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onDelete, onClo
             </div>
             {emp.role && <div className="text-xs text-gray-500">{emp.role}</div>}
             <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
-              <span className="font-semibold text-amber-600">{totalHours.toFixed(1)}h total</span>
-              {emp.hourlyWage > 0 && (
+              {payrollType === "hourly" && (
                 <>
-                  <span>·</span>
-                  <span>{currencySymbol}{emp.hourlyWage.toFixed(2)}/hr</span>
-                  {weeklyPay && <span>· Est. {currencySymbol}{weeklyPay} pay</span>}
+                  <span className="font-semibold text-amber-600">{totalHours.toFixed(1)}h total</span>
+                  {emp.hourlyWage > 0 && (
+                    <>
+                      <span>·</span>
+                      <span>{currencySymbol}{emp.hourlyWage.toFixed(2)}/hr</span>
+                      {weeklyPay && <span>· Est. {currencySymbol}{weeklyPay} pay</span>}
+                    </>
+                  )}
                 </>
+              )}
+              {(payrollType === "daily" || payrollType === "salary") && emp.dailyWage > 0 && (
+                <span className="font-semibold text-blue-600">{currencySymbol}{Number(emp.dailyWage).toFixed(2)}/day</span>
               )}
             </div>
           </div>
         </div>
         <div className="flex gap-1 flex-shrink-0">
-          <button
-            onClick={() => onLogShift(emp)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 text-xs font-semibold transition-colors"
-          >
-            <Clock size={12} /> Log
-          </button>
+          {payrollType === "hourly" && (
+            <button
+              onClick={() => onLogShift(emp)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 text-xs font-semibold transition-colors"
+            >
+              <Clock size={12} /> Log
+            </button>
+          )}
+          {(payrollType === "daily" || payrollType === "salary") && (
+            <button
+              onClick={() => onRecordDay(emp)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 text-xs font-semibold transition-colors"
+            >
+              <Calendar size={12} /> Record Day
+            </button>
+          )}
           <button
             onClick={() => onDelete(emp.id)}
             className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
@@ -103,31 +138,33 @@ function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onDelete, onClo
         </div>
       </div>
 
-      {/* Clock in/out section */}
-      {activeShift ? (
-        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-3 mb-3 flex items-center justify-between">
-          <div>
-            <div className="text-xs text-green-600 font-semibold">Currently Working</div>
-            <div className="text-xl font-mono font-bold text-green-700 tabular-nums">{formatElapsed(elapsed)}</div>
-            <div className="text-xs text-green-500">Started {formatTime(activeShift.shiftStart)}</div>
+      {/* Clock in/out section — hourly only */}
+      {payrollType === "hourly" && (
+        activeShift ? (
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-3 mb-3 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-green-600 font-semibold">Currently Working</div>
+              <div className="text-xl font-mono font-bold text-green-700 tabular-nums">{formatElapsed(elapsed)}</div>
+              <div className="text-xs text-green-500">Started {formatTime(activeShift.shiftStart)}</div>
+            </div>
+            <button
+              onClick={() => onClockOut(activeShift.id)}
+              className="flex items-center gap-1.5 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-colors"
+            >
+              <LogOut size={14} /> Clock Out
+            </button>
           </div>
+        ) : (
           <button
-            onClick={() => onClockOut(activeShift.id)}
-            className="flex items-center gap-1.5 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-colors"
+            onClick={() => onClockIn(emp)}
+            className="w-full flex items-center justify-center gap-2 mb-3 py-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 rounded-xl text-sm font-semibold transition-colors"
           >
-            <LogOut size={14} /> Clock Out
+            <LogIn size={14} /> Clock In
           </button>
-        </div>
-      ) : (
-        <button
-          onClick={() => onClockIn(emp)}
-          className="w-full flex items-center justify-center gap-2 mb-3 py-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 rounded-xl text-sm font-semibold transition-colors"
-        >
-          <LogIn size={14} /> Clock In
-        </button>
+        )
       )}
 
-      {empShifts.length > 0 && (
+      {payrollType === "hourly" && empShifts.length > 0 && (
         <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
           <div className="text-xs font-semibold text-gray-400 mb-2">Recent Completed Shifts</div>
           <div className="space-y-1">
@@ -154,7 +191,9 @@ export default function EmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [showLogShift, setShowLogShift] = useState(false);
-  const [newEmployee, setNewEmployee] = useState({ name: "", role: "", hourlyWage: 15, pin: "" });
+  const [showRecordDay, setShowRecordDay] = useState(false);
+  const [showPayrollReport, setShowPayrollReport] = useState(false);
+  const [newEmployee, setNewEmployee] = useState({ name: "", role: "", hourlyWage: 15, dailyWage: 0, payrollType: "hourly" as "hourly" | "daily" | "salary", pin: "" });
   const [shiftForm, setShiftForm] = useState<InsertShift>({
     employeeId: "",
     employeeName: "",
@@ -162,6 +201,20 @@ export default function EmployeesPage() {
     shiftEnd: now().slice(0, 16),
     hoursWorked: null,
   });
+  const [recordDayForm, setRecordDayForm] = useState({
+    employeeId: "",
+    employeeName: "",
+    workDate: new Date().toISOString().split("T")[0],
+    daysWorked: 1,
+    dailyRate: 0,
+    note: "",
+  });
+  const [payrollReport, setPayrollReport] = useState<PayrollReportEntry[]>([]);
+  const [payrollRange, setPayrollRange] = useState({
+    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0],
+    end: new Date().toISOString().split("T")[0],
+  });
+  const [payrollLoading, setPayrollLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const currencySymbol = profile ? getCurrencySymbol(profile.currency) : "$";
 
@@ -177,12 +230,14 @@ export default function EmployeesPage() {
   async function handleAddEmployee() {
     if (!newEmployee.name.trim()) return;
     await createEmployee({
-      name: newEmployee.name.trim(),
-      role: newEmployee.role.trim(),
-      hourlyWage: newEmployee.hourlyWage,
-      pin: newEmployee.pin || "0000",
+      name:        newEmployee.name.trim(),
+      role:        newEmployee.role.trim(),
+      hourlyWage:  newEmployee.payrollType === "hourly" ? newEmployee.hourlyWage : 0,
+      dailyWage:   newEmployee.payrollType !== "hourly" ? newEmployee.dailyWage  : 0,
+      payrollType: newEmployee.payrollType,
+      pin:         newEmployee.pin || "0000",
     });
-    setNewEmployee({ name: "", role: "", hourlyWage: 15, pin: "" });
+    setNewEmployee({ name: "", role: "", hourlyWage: 15, dailyWage: 0, payrollType: "hourly", pin: "" });
     setShowAddEmployee(false);
     load();
   }
@@ -213,6 +268,27 @@ export default function EmployeesPage() {
     load();
   }
 
+  async function handleRecordDay() {
+    if (!recordDayForm.employeeId) return;
+    const totalPay = recordDayForm.daysWorked * recordDayForm.dailyRate;
+    await createDailyPayRecord({
+      employeeId: recordDayForm.employeeId,
+      workDate:   recordDayForm.workDate,
+      daysWorked: recordDayForm.daysWorked,
+      dailyRate:  recordDayForm.dailyRate,
+      totalPay,
+      note:       recordDayForm.note || undefined,
+    });
+    setShowRecordDay(false);
+  }
+
+  async function handleGeneratePayroll() {
+    setPayrollLoading(true);
+    const report = await getPayrollReport(payrollRange.start, payrollRange.end);
+    setPayrollReport(report);
+    setPayrollLoading(false);
+  }
+
   function openLogShift(emp: Employee) {
     const nowStr = new Date().toISOString().slice(0, 16);
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString().slice(0, 16);
@@ -226,7 +302,20 @@ export default function EmployeesPage() {
     setShowLogShift(true);
   }
 
+  function openRecordDay(emp: Employee) {
+    setRecordDayForm({
+      employeeId: emp.id,
+      employeeName: emp.name,
+      workDate: new Date().toISOString().split("T")[0],
+      daysWorked: 1,
+      dailyRate: Number(emp.dailyWage) || 0,
+      note: "",
+    });
+    setShowRecordDay(true);
+  }
+
   const clockedInCount = shifts.filter((s) => s.shiftEnd === null).length;
+  const totalGrossPay = payrollReport.reduce((sum, r) => sum + r.estimatedPay, 0);
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-4">
@@ -267,11 +356,95 @@ export default function EmployeesPage() {
               shifts={shifts}
               currencySymbol={currencySymbol}
               onLogShift={openLogShift}
+              onRecordDay={openRecordDay}
               onDelete={(id) => setDeleteConfirm(id)}
               onClockIn={handleClockIn}
               onClockOut={handleClockOut}
             />
           ))}
+        </div>
+      )}
+
+      {/* Payroll Summary Section */}
+      {employees.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <BarChart2 size={18} className="text-amber-600" />
+            <h2 className="font-bold text-gray-800 dark:text-gray-100">Payroll Summary</h2>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Start Date</label>
+              <input
+                type="date"
+                value={payrollRange.start}
+                onChange={e => setPayrollRange(p => ({ ...p, start: e.target.value }))}
+                className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">End Date</label>
+              <input
+                type="date"
+                value={payrollRange.end}
+                onChange={e => setPayrollRange(p => ({ ...p, end: e.target.value }))}
+                className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+              />
+            </div>
+          </div>
+          <button
+            onClick={handleGeneratePayroll}
+            disabled={payrollLoading}
+            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl px-4 py-2 text-sm font-semibold transition-colors"
+          >
+            <BarChart2 size={14} /> {payrollLoading ? "Generating…" : "Generate Report"}
+          </button>
+
+          {payrollReport.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 dark:border-gray-700">
+                    <th className="text-left py-2 px-3 font-semibold text-gray-500 dark:text-gray-400">Employee</th>
+                    <th className="text-left py-2 px-3 font-semibold text-gray-500 dark:text-gray-400">Type</th>
+                    <th className="text-right py-2 px-3 font-semibold text-gray-500 dark:text-gray-400">Hours/Days</th>
+                    <th className="text-right py-2 px-3 font-semibold text-gray-500 dark:text-gray-400">Rate</th>
+                    <th className="text-right py-2 px-3 font-semibold text-gray-500 dark:text-gray-400">Gross Pay</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
+                  {payrollReport.map((row) => {
+                    const emp = employees.find(e => e.id === row.employee.id);
+                    return (
+                      <tr key={row.employee.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="py-2 px-3 font-medium text-gray-800 dark:text-gray-100">{row.employee.name}</td>
+                        <td className="py-2 px-3">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PAYROLL_TYPE_COLORS[row.employee.payrollType] ?? "bg-gray-100 text-gray-600"}`}>
+                            {PAYROLL_TYPE_LABELS[row.employee.payrollType] ?? row.employee.payrollType}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-right text-gray-600 dark:text-gray-300">
+                          {row.hoursWorked !== undefined ? `${row.hoursWorked.toFixed(1)}h` : `${row.dailyRecords?.reduce((s, d) => s + d.daysWorked, 0).toFixed(2) ?? "—"}d`}
+                        </td>
+                        <td className="py-2 px-3 text-right text-gray-600 dark:text-gray-300">
+                          {row.employee.payrollType === "hourly"
+                            ? `${currencySymbol}${emp?.hourlyWage?.toFixed(2) ?? "—"}/hr`
+                            : `${currencySymbol}${Number(emp?.dailyWage ?? 0).toFixed(2)}/day`}
+                        </td>
+                        <td className="py-2 px-3 text-right font-bold text-amber-600">{currencySymbol}{row.estimatedPay.toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 dark:border-gray-600">
+                    <td colSpan={4} className="py-2 px-3 font-bold text-gray-700 dark:text-gray-200">Total</td>
+                    <td className="py-2 px-3 text-right font-bold text-amber-700">{currencySymbol}{totalGrossPay.toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -303,16 +476,42 @@ export default function EmployeesPage() {
                   placeholder="e.g. Cashier"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Hourly Wage ({currencySymbol})</label>
-                  <CurrencyInput
-                    value={newEmployee.hourlyWage}
-                    onChange={(v) => setNewEmployee((p) => ({ ...p, hourlyWage: v }))}
-                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
-                    placeholder="15.00"
-                  />
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Payroll Type</label>
+                <div className="flex gap-2">
+                  {(["hourly", "daily", "salary"] as const).map(pt => (
+                    <button
+                      key={pt}
+                      onClick={() => setNewEmployee(p => ({ ...p, payrollType: pt }))}
+                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-semibold transition-all capitalize ${newEmployee.payrollType === pt ? "border-amber-500 bg-amber-50 text-amber-700" : "border-gray-200 bg-white text-gray-600 hover:border-amber-300"}`}
+                    >
+                      {PAYROLL_TYPE_LABELS[pt]}
+                    </button>
+                  ))}
                 </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {newEmployee.payrollType === "hourly" ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1.5">Hourly Wage ({currencySymbol})</label>
+                    <CurrencyInput
+                      value={newEmployee.hourlyWage}
+                      onChange={(v) => setNewEmployee((p) => ({ ...p, hourlyWage: v }))}
+                      className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                      placeholder="15.00"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1.5">Daily Wage ({currencySymbol})</label>
+                    <CurrencyInput
+                      value={newEmployee.dailyWage}
+                      onChange={(v) => setNewEmployee((p) => ({ ...p, dailyWage: v }))}
+                      className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                      placeholder="100.00"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5">4-digit PIN</label>
                   <input
@@ -375,6 +574,71 @@ export default function EmployeesPage() {
             <div className="px-6 pb-6 flex gap-3">
               <button onClick={() => setShowLogShift(false)} className="flex-1 border border-gray-300 rounded-xl py-3 text-sm font-semibold text-gray-600">{t.common.cancel}</button>
               <button onClick={handleLogShift} className="flex-[2] bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl py-3 text-sm transition-colors">{t.employees.logShift}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record Day Modal */}
+      {showRecordDay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+              <h2 className="font-bold text-gray-800 dark:text-gray-100">Record Day — {recordDayForm.employeeName}</h2>
+              <button onClick={() => setShowRecordDay(false)} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Work Date</label>
+                <input
+                  type="date"
+                  value={recordDayForm.workDate}
+                  onChange={(e) => setRecordDayForm(f => ({ ...f, workDate: e.target.value }))}
+                  className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Days Worked</label>
+                  <input
+                    type="number"
+                    min={0.25}
+                    max={2}
+                    step={0.25}
+                    value={recordDayForm.daysWorked}
+                    onChange={(e) => setRecordDayForm(f => ({ ...f, daysWorked: parseFloat(e.target.value) || 0 }))}
+                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Daily Rate ({currencySymbol})</label>
+                  <CurrencyInput
+                    value={recordDayForm.dailyRate}
+                    onChange={(v) => setRecordDayForm(f => ({ ...f, dailyRate: v }))}
+                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                  />
+                </div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-center">
+                <div className="text-xs text-blue-600 font-semibold">Total Pay</div>
+                <div className="text-2xl font-bold text-blue-700">
+                  {currencySymbol}{(recordDayForm.daysWorked * recordDayForm.dailyRate).toFixed(2)}
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Note (optional)</label>
+                <input
+                  type="text"
+                  value={recordDayForm.note}
+                  onChange={(e) => setRecordDayForm(f => ({ ...f, note: e.target.value }))}
+                  className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                  placeholder="e.g. Holiday bonus day"
+                />
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex gap-3">
+              <button onClick={() => setShowRecordDay(false)} className="flex-1 border border-gray-300 rounded-xl py-3 text-sm font-semibold text-gray-600">{t.common.cancel}</button>
+              <button onClick={handleRecordDay} className="flex-[2] bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl py-3 text-sm transition-colors">{t.common.save}</button>
             </div>
           </div>
         </div>

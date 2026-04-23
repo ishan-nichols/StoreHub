@@ -28,6 +28,8 @@ export const storeProfiles = pgTable("store_profiles", {
   storeAddress:        varchar("store_address",   { length: 500 }),
   printerName:         varchar("printer_name",    { length: 255 }),
   printerConnection:   varchar("printer_connection", { length: 20 }),
+  country:             varchar("country",           { length: 2 }),
+  stateCode:           varchar("state_code",        { length: 20 }),
   // Onboarding v2
   onboardingVersion:   integer("onboarding_version"),
   storeSize:           varchar("store_size",       { length: 20 }),
@@ -142,6 +144,8 @@ export const employees = pgTable("employees", {
   role:        varchar("role", { length: 100 }).notNull().default(""),
   pin:         varchar("pin",  { length: 20 }).notNull().default(""),
   hourlyWage:  doublePrecision("hourly_wage").notNull().default(0),
+  payrollType: varchar("payroll_type", { length: 20 }).notNull().default("hourly"),
+  dailyWage:   numeric("daily_wage", { precision: 10, scale: 2 }).default("0"),
   createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ byUser: index("employees_user_idx").on(t.userId) }));
 
@@ -238,3 +242,19 @@ export type InsertRecipe     = typeof recipes.$inferInsert;
 export type RecipeIngredient = typeof recipeIngredients.$inferSelect;
 export type MenuItem         = typeof menuItems.$inferSelect;
 export type InsertMenuItem   = typeof menuItems.$inferInsert;
+
+// ── Daily Pay Records ─────────────────────────────────────────────────────────
+export const dailyPayRecords = pgTable("daily_pay_records", {
+  id:          uuid("id").primaryKey().defaultRandom(),
+  userId:      uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  employeeId:  uuid("employee_id").notNull().references(() => employees.id, { onDelete: "cascade" }),
+  workDate:    varchar("work_date", { length: 10 }).notNull(),  // "YYYY-MM-DD"
+  daysWorked:  numeric("days_worked", { precision: 3, scale: 2 }).notNull().default("1"),
+  dailyRate:   numeric("daily_rate", { precision: 10, scale: 2 }).notNull(),
+  totalPay:    numeric("total_pay", { precision: 10, scale: 2 }).notNull(),
+  note:        varchar("note", { length: 255 }),
+  createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type DailyPayRecord       = typeof dailyPayRecords.$inferSelect;
+export type InsertDailyPayRecord = typeof dailyPayRecords.$inferInsert;

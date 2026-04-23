@@ -30,6 +30,9 @@ export interface UserProfile {
   onboardingCompleted: boolean;
   storeCity?: string;
   storeAddress?: string;
+  country?: "US" | "MX";
+  stateCode?: string;
+  stateName?: string;
   printerName?: string;
   printerConnection?: "browser" | "network" | "bluetooth";
   accentColor?: string;
@@ -146,7 +149,28 @@ export interface Employee {
   role: string;
   pin: string;
   hourlyWage: number;
+  payrollType: "hourly" | "daily" | "salary";
+  dailyWage: number;
   createdAt: string;
+}
+
+export interface DailyPayRecord {
+  id: string;
+  employeeId: string;
+  workDate: string;
+  daysWorked: number;
+  dailyRate: number;
+  totalPay: number;
+  note?: string;
+  createdAt: string;
+}
+
+export interface PayrollReportEntry {
+  employee: { id: string; name: string; role: string; payrollType: string };
+  hoursWorked?: number;
+  estimatedPay: number;
+  shifts?: Shift[];
+  dailyRecords?: DailyPayRecord[];
 }
 
 export interface Shift {
@@ -178,6 +202,7 @@ export type InsertExpense = Omit<Expense, "id" | "createdAt">;
 export type InsertSupplier = Omit<Supplier, "id" | "createdAt">;
 export type InsertEmployee = Omit<Employee, "id" | "createdAt">;
 export type InsertShift = Omit<Shift, "id" | "createdAt">;
+export type InsertDailyPayRecord = Omit<DailyPayRecord, "id" | "createdAt">;
 
 export type RecurringFrequency = "daily" | "weekly" | "monthly" | "yearly";
 

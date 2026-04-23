@@ -34,6 +34,9 @@ import type {
   InsertRecurringExpense,
   ScheduledPriceChange,
   InsertScheduledPriceChange,
+  DailyPayRecord,
+  InsertDailyPayRecord,
+  PayrollReportEntry,
 } from "../schemas";
 import { generateId, generateReceiptNumber, now, isToday, getDayName } from "../utils";
 
@@ -799,5 +802,102 @@ export async function getDashboardSummary(profile: UserProfile | null): Promise<
     busiestDays,
     biggestExpenseCategories,
     smartTips,
+  };
+}
+
+// ─── Daily Pay Records ─────────────────────────────────────────────────────────
+
+export async function getDailyPayRecords(): Promise<DailyPayRecord[]> {
+  await Promise.resolve();
+  return getItem<DailyPayRecord>("storehub_daily_pay_records");
+}
+
+export async function createDailyPayRecord(data: InsertDailyPayRecord): Promise<DailyPayRecord> {
+  await Promise.resolve();
+  const record: DailyPayRecord = { ...data, id: generateId(), createdAt: now() };
+  const list = getItem<DailyPayRecord>("storehub_daily_pay_records");
+  setItem("storehub_daily_pay_records", [...list, record]);
+  return record;
+}
+
+export async function deleteDailyPayRecord(id: string): Promise<boolean> {
+  await Promise.resolve();
+  const list = getItem<DailyPayRecord>("storehub_daily_pay_records");
+  setItem("storehub_daily_pay_records", list.filter((r) => r.id !== id));
+  return true;
+}
+
+export async function getPayrollReport(start: string, end: string): Promise<PayrollReportEntry[]> {
+  await Promise.resolve();
+  const emps = getItem<Employee>(KEYS.EMPLOYEES);
+  const allShifts = getItem<Shift>(KEYS.SHIFTS);
+  const allDailyRecords = getItem<DailyPayRecord>("storehub_daily_pay_records");
+
+  const startDate = new Date(start);
+  const endDate   = new Date(end + "T23:59:59");
+
+  return emps.map((emp) => {
+    const payrollType = emp.payrollType ?? "hourly";
+    if (payrollType === "hourly") {
+      const empShifts = allShifts.filter((s) => {
+        if (s.employeeId !== emp.id || s.shiftEnd === null) return false;
+        const d = new Date(s.shiftStart);
+        return d >= startDate && d <= endDate;
+      });
+      const hoursWorked = empShifts.reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
+      const estimatedPay = hoursWorked * (emp.hourlyWage ?? 0);
+      return {
+        employee: { id: emp.id, name: emp.name, role: emp.role, payrollType },
+        hoursWorked,
+        estimatedPay,
+        shifts: empShifts,
+      };
+    } else {
+      const empDailyRecords = allDailyRecords.filter((d) => {
+        if (d.employeeId !== emp.id) return false;
+        const date = new Date(d.workDate);
+        return date >= startDate && date <= endDate;
+      });
+      const estimatedPay = empDailyRecords.reduce((sum, d) => sum + (d.totalPay ?? 0), 0);
+      return {
+        employee: { id: emp.id, name: emp.name, role: emp.role, payrollType },
+        estimatedPay,
+        dailyRecords: empDailyRecords,
+      };
+    }
+  });
+}
+
+export async function getTaxSummary(): Promise<{
+  profile: { country?: string; stateCode?: string; taxRate: number; currency: string };
+  currentMonth: { totalSales: number; taxCollected: number; totalExpenses: number };
+  ytd: { totalSales: number; taxCollected: number; totalExpenses: number };
+} | null> {
+  await Promise.resolve();
+  const profile = getSingle<UserProfile>(KEYS.USER_PROFILE);
+  if (!profile) return null;
+
+  const allSales = getItem<Sale>(KEYS.SALES);
+  const allExpenses = getItem<Expense>(KEYS.EXPENSES);
+  const taxRate = profile.taxRate ?? 0;
+
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const yearStart  = new Date(now.getFullYear(), 0, 1);
+
+  const filterSales = (from: Date) =>
+    allSales.filter((s) => new Date(s.createdAt) >= from).reduce((sum, s) => sum + s.total, 0);
+  const filterExpenses = (from: Date) =>
+    allExpenses.filter((e) => new Date(e.date) >= from).reduce((sum, e) => sum + e.amount, 0);
+
+  const monthSales    = filterSales(monthStart);
+  const monthExpenses = filterExpenses(monthStart);
+  const ytdSales      = filterSales(yearStart);
+  const ytdExpenses   = filterExpenses(yearStart);
+
+  return {
+    profile: { country: profile.country, stateCode: profile.stateCode, taxRate, currency: profile.currency },
+    currentMonth: { totalSales: monthSales, taxCollected: monthSales * taxRate, totalExpenses: monthExpenses },
+    ytd: { totalSales: ytdSales, taxCollected: ytdSales * taxRate, totalExpenses: ytdExpenses },
   };
 }
