@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useApp } from "../contexts/useApp";
 import { useAuth } from "../contexts/AuthContext";
-import type { UserProfile, Language, Theme, MotionLevel, HoverStyle, SurfaceStyle } from "../schemas";
+import type { UserProfile, Language, Theme, MotionLevel, HoverStyle, SurfaceStyle, CornerRadius, BlurIntensity, ShadowDepth, ContrastLevel, TypographyWeight, SpacingDensity } from "../schemas";
 import { updateUserProfile, clearAllData } from "../services/dataService";
 import { COLOR_PRESETS, DEFAULT_ACCENT, applyAccentColor } from "../lib/themeColors";
 import { getStorageMode, setStorageMode, type StorageMode } from "../services/storageMode";
@@ -11,7 +11,8 @@ import { getCurrencySymbol } from "../utils";
 import { ActionPill, PageHero, SectionTitle, SummaryTile, SurfaceCard } from "../components/page-shell";
 import {
   CheckCircle, Printer, MapPin, Plug, Globe, RotateCcw, ChevronRight,
-  Cloud, HardDrive, LogIn, LogOut, UploadCloud, DownloadCloud, Loader2, Sparkles, Wand2, Layers3
+  Cloud, HardDrive, LogIn, LogOut, UploadCloud, DownloadCloud, Loader2, Sparkles, Wand2, Layers3,
+  Palette, Wind, Lightbulb, Type, Grid3x3, Eye
 } from "lucide-react";
 
 const PAIN_POINT_LABELS: Record<string, string> = {
@@ -91,6 +92,12 @@ export default function SettingsPage() {
   const [motionLevel, setMotionLevel] = useState<MotionLevel>(uiPreferences.motionLevel);
   const [hoverStyle, setHoverStyle] = useState<HoverStyle>(uiPreferences.hoverStyle);
   const [surfaceStyle, setSurfaceStyle] = useState<SurfaceStyle>(uiPreferences.surfaceStyle);
+  const [cornerRadius, setCornerRadius] = useState<CornerRadius | undefined>(uiPreferences.cornerRadius);
+  const [blurIntensity, setBlurIntensity] = useState<BlurIntensity | undefined>(uiPreferences.blurIntensity);
+  const [shadowDepth, setShadowDepth] = useState<ShadowDepth | undefined>(uiPreferences.shadowDepth);
+  const [contrastLevel, setContrastLevel] = useState<ContrastLevel | undefined>(uiPreferences.contrastLevel);
+  const [typographyWeight, setTypographyWeight] = useState<TypographyWeight | undefined>(uiPreferences.typographyWeight);
+  const [spacingDensity, setSpacingDensity] = useState<SpacingDensity | undefined>(uiPreferences.spacingDensity);
 
   useEffect(() => {
     if (!didHydratePreview.current) {
@@ -100,12 +107,30 @@ export default function SettingsPage() {
     if (
       uiPreferences.motionLevel === motionLevel &&
       uiPreferences.hoverStyle === hoverStyle &&
-      uiPreferences.surfaceStyle === surfaceStyle
+      uiPreferences.surfaceStyle === surfaceStyle &&
+      uiPreferences.cornerRadius === cornerRadius &&
+      uiPreferences.blurIntensity === blurIntensity &&
+      uiPreferences.shadowDepth === shadowDepth &&
+      uiPreferences.contrastLevel === contrastLevel &&
+      uiPreferences.typographyWeight === typographyWeight &&
+      uiPreferences.spacingDensity === spacingDensity &&
+      uiPreferences.accentColor === accentColor
     ) {
       return;
     }
-    void updateUIPreferences({ motionLevel, hoverStyle, surfaceStyle });
-  }, [motionLevel, hoverStyle, surfaceStyle, uiPreferences, updateUIPreferences]);
+    void updateUIPreferences({
+      motionLevel,
+      hoverStyle,
+      surfaceStyle,
+      cornerRadius,
+      blurIntensity,
+      shadowDepth,
+      contrastLevel,
+      typographyWeight,
+      spacingDensity,
+      accentColor
+    });
+  }, [motionLevel, hoverStyle, surfaceStyle, cornerRadius, blurIntensity, shadowDepth, contrastLevel, typographyWeight, spacingDensity, accentColor, uiPreferences, updateUIPreferences]);
 
   function pickAccent(hex: string) {
     setAccentColor(hex);
@@ -138,6 +163,13 @@ export default function SettingsPage() {
         motionLevel,
         hoverStyle,
         surfaceStyle,
+        cornerRadius,
+        blurIntensity,
+        shadowDepth,
+        contrastLevel,
+        typographyWeight,
+        spacingDensity,
+        accentColor,
       },
     });
     await refreshProfile();
@@ -145,6 +177,13 @@ export default function SettingsPage() {
       motionLevel,
       hoverStyle,
       surfaceStyle,
+      cornerRadius,
+      blurIntensity,
+      shadowDepth,
+      contrastLevel,
+      typographyWeight,
+      spacingDensity,
+      accentColor,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -271,8 +310,8 @@ export default function SettingsPage() {
 
       <SurfaceCard className="space-y-6">
         <SectionTitle
-          title="Experience customization"
-          description="These controls shape the way the product moves, hovers, and layers. They stay subtle by design so the Apple-like calm still comes through."
+          title="Theme & Experience customization"
+          description="Personalize how the app looks and feels. All changes preview instantly and sync across your devices."
           aside={
             <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
               <Wand2 size={14} className="text-amber-500" />
@@ -281,50 +320,204 @@ export default function SettingsPage() {
           }
         />
 
-        <div className="grid gap-6 lg:grid-cols-3">
+        {/* Live Preview Panel */}
+        <CustomizationPreview
+          motionLevel={motionLevel}
+          hoverStyle={hoverStyle}
+          surfaceStyle={surfaceStyle}
+          cornerRadius={cornerRadius}
+          blurIntensity={blurIntensity}
+          shadowDepth={shadowDepth}
+          contrastLevel={contrastLevel}
+          typographyWeight={typographyWeight}
+          spacingDensity={spacingDensity}
+          accentColor={accentColor}
+        />
+
+        {/* Grid of Customization Controls */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Accent Color */}
+          <PreferenceGroup
+            icon={<Palette size={16} className="text-amber-600" />}
+            title="Accent color"
+            description="Your signature color for buttons, accents, and focus states."
+          >
+            <div className="space-y-3">
+              <div className="grid grid-cols-6 gap-2">
+                {COLOR_PRESETS.map((c) => {
+                  const selected = accentColor.toLowerCase() === c.hex.toLowerCase();
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => pickAccent(c.hex)}
+                      title={c.name}
+                      aria-label={c.name}
+                      className={`relative h-10 rounded-lg border-2 transition-all ${
+                        selected
+                          ? "border-foreground ring-2 ring-offset-2 ring-foreground/30"
+                          : "border-gray-200 dark:border-gray-700 hover:scale-105"
+                      }`}
+                      style={{ backgroundColor: c.hex }}
+                    >
+                      {selected && (
+                        <CheckCircle
+                          size={16}
+                          className="absolute inset-0 m-auto text-white drop-shadow"
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="accent-custom"
+                  type="color"
+                  value={accentColor}
+                  onChange={(e) => pickAccent(e.target.value)}
+                  className="h-9 w-14 rounded cursor-pointer border border-gray-200 dark:border-gray-700 bg-transparent"
+                  title="Custom color picker"
+                />
+                <input
+                  type="text"
+                  value={accentColor}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setAccentColor(v);
+                    if (/^#[0-9a-fA-F]{6}$/.test(v)) applyAccentColor(v);
+                  }}
+                  className={`${inputCls} w-24 font-mono text-xs`}
+                  placeholder="#hex"
+                />
+                <button
+                  type="button"
+                  onClick={() => pickAccent(DEFAULT_ACCENT)}
+                  className="text-xs text-gray-500 hover:text-amber-600 underline"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          </PreferenceGroup>
+
+          {/* Motion Style */}
           <PreferenceGroup
             icon={<Sparkles size={16} className="text-amber-600" />}
             title="Motion style"
-            description="Control reveal speed, hover animation, and how energetic the interface feels."
+            description="Control reveal speed and transition energy."
           >
             <PreferencePill
               active={motionLevel === "reduced"}
               title="Reduced"
-              description="Clean and steady with almost no motion."
+              description="Clean and steady, minimal motion."
               onClick={() => setMotionLevel("reduced")}
             />
             <PreferencePill
               active={motionLevel === "gentle"}
               title="Gentle"
-              description="Soft movement and calm transitions."
+              description="Soft, calm transitions (default)."
               onClick={() => setMotionLevel("gentle")}
             />
             <PreferencePill
               active={motionLevel === "expressive"}
               title="Expressive"
-              description="More cinematic movement and weighted flow."
+              description="Cinematic, energetic feel."
               onClick={() => setMotionLevel("expressive")}
             />
           </PreferenceGroup>
 
+          {/* Hover Depth */}
           <PreferenceGroup
             icon={<ArrowIcon />}
             title="Hover depth"
-            description="Choose how much cards and controls lift when your mouse reaches them."
+            description="How much interactive elements lift on hover."
           >
-            <PreferencePill active={hoverStyle === "soft"} title="Soft" description="Barely-there movement." onClick={() => setHoverStyle("soft")} />
-            <PreferencePill active={hoverStyle === "lifted"} title="Lifted" description="Balanced depth and polish." onClick={() => setHoverStyle("lifted")} />
-            <PreferencePill active={hoverStyle === "dramatic"} title="Dramatic" description="More dimensional and tactile." onClick={() => setHoverStyle("dramatic")} />
+            <PreferencePill active={hoverStyle === "soft"} title="Soft" description="Subtle, minimal lift." onClick={() => setHoverStyle("soft")} />
+            <PreferencePill active={hoverStyle === "lifted"} title="Lifted" description="Balanced, balanced depth." onClick={() => setHoverStyle("lifted")} />
+            <PreferencePill active={hoverStyle === "dramatic"} title="Dramatic" description="Bold, pronounced lift." onClick={() => setHoverStyle("dramatic")} />
           </PreferenceGroup>
 
+          {/* Surface Finish */}
           <PreferenceGroup
             icon={<Layers3 size={16} className="text-amber-600" />}
             title="Surface finish"
-            description="Adjust how airy, glassy, or grounded the interface panels feel."
+            description="How airy, glassy, or solid panels appear."
           >
-            <PreferencePill active={surfaceStyle === "glass"} title="Glass" description="Maximum translucency and glow." onClick={() => setSurfaceStyle("glass")} />
-            <PreferencePill active={surfaceStyle === "balanced"} title="Balanced" description="Soft glass with stronger readability." onClick={() => setSurfaceStyle("balanced")} />
-            <PreferencePill active={surfaceStyle === "solid"} title="Solid" description="More opaque and focused." onClick={() => setSurfaceStyle("solid")} />
+            <PreferencePill active={surfaceStyle === "glass"} title="Glass" description="Translucent, atmospheric." onClick={() => setSurfaceStyle("glass")} />
+            <PreferencePill active={surfaceStyle === "balanced"} title="Balanced" description="Soft glass, readable." onClick={() => setSurfaceStyle("balanced")} />
+            <PreferencePill active={surfaceStyle === "solid"} title="Solid" description="Opaque, focused." onClick={() => setSurfaceStyle("solid")} />
+          </PreferenceGroup>
+
+          {/* Corner Radius */}
+          <PreferenceGroup
+            icon={<Eye size={16} className="text-amber-600" />}
+            title="Corner radius"
+            description="Roundness of buttons, cards, and inputs."
+          >
+            <PreferencePill active={cornerRadius === "sharp"} title="Sharp" description="Minimal rounding, technical." onClick={() => setCornerRadius("sharp")} />
+            <PreferencePill active={cornerRadius === "rounded"} title="Rounded" description="Classic, balanced." onClick={() => setCornerRadius("rounded")} />
+            <PreferencePill active={cornerRadius === "smooth"} title="Smooth" description="Soft, modern." onClick={() => setCornerRadius("smooth")} />
+            <PreferencePill active={cornerRadius === "organic"} title="Organic" description="iOS-like, playful." onClick={() => setCornerRadius("organic")} />
+          </PreferenceGroup>
+
+          {/* Blur Intensity */}
+          <PreferenceGroup
+            icon={<Wind size={16} className="text-amber-600" />}
+            title="Blur intensity"
+            description="Glass panel translucency depth."
+          >
+            <PreferencePill active={blurIntensity === "minimal"} title="Minimal" description="Subtle effect." onClick={() => setBlurIntensity("minimal")} />
+            <PreferencePill active={blurIntensity === "subtle"} title="Subtle" description="Light blur (default)." onClick={() => setBlurIntensity("subtle")} />
+            <PreferencePill active={blurIntensity === "moderate"} title="Moderate" description="More atmospheric." onClick={() => setBlurIntensity("moderate")} />
+            <PreferencePill active={blurIntensity === "strong"} title="Strong" description="Dramatic, theatrical." onClick={() => setBlurIntensity("strong")} />
+          </PreferenceGroup>
+
+          {/* Shadow Depth */}
+          <PreferenceGroup
+            icon={<Lightbulb size={16} className="text-amber-600" />}
+            title="Shadow depth"
+            description="Elevation perception via shadows."
+          >
+            <PreferencePill active={shadowDepth === "flat"} title="Flat" description="Minimal shadows." onClick={() => setShadowDepth("flat")} />
+            <PreferencePill active={shadowDepth === "subtle"} title="Subtle" description="Slight depth." onClick={() => setShadowDepth("subtle")} />
+            <PreferencePill active={shadowDepth === "lifted"} title="Lifted" description="Floating cards." onClick={() => setShadowDepth("lifted")} />
+            <PreferencePill active={shadowDepth === "dramatic"} title="Dramatic" description="Maximum depth." onClick={() => setShadowDepth("dramatic")} />
+          </PreferenceGroup>
+
+          {/* Contrast Level */}
+          <PreferenceGroup
+            icon={<Lightbulb size={16} className="text-amber-600" />}
+            title="Contrast level"
+            description="Color saturation and brightness for accessibility."
+          >
+            <PreferencePill active={contrastLevel === "standard"} title="Standard" description="Default, WCAG AA." onClick={() => setContrastLevel("standard")} />
+            <PreferencePill active={contrastLevel === "enhanced"} title="Enhanced" description="Boosted, WCAG AAA." onClick={() => setContrastLevel("enhanced")} />
+            <PreferencePill active={contrastLevel === "high"} title="High" description="Maximum contrast." onClick={() => setContrastLevel("high")} />
+          </PreferenceGroup>
+
+          {/* Typography Weight */}
+          <PreferenceGroup
+            icon={<Type size={16} className="text-amber-600" />}
+            title="Typography weight"
+            description="Font boldness across the app."
+          >
+            <PreferencePill active={typographyWeight === "light"} title="Light" description="Elegant, thin." onClick={() => setTypographyWeight("light")} />
+            <PreferencePill active={typographyWeight === "regular"} title="Regular" description="Default, balanced." onClick={() => setTypographyWeight("regular")} />
+            <PreferencePill active={typographyWeight === "medium"} title="Medium" description="Heavier emphasis." onClick={() => setTypographyWeight("medium")} />
+            <PreferencePill active={typographyWeight === "bold"} title="Bold" description="Maximum weight." onClick={() => setTypographyWeight("bold")} />
+          </PreferenceGroup>
+
+          {/* Spacing Density */}
+          <PreferenceGroup
+            icon={<Grid3x3 size={16} className="text-amber-600" />}
+            title="Spacing density"
+            description="Padding and gaps throughout."
+          >
+            <PreferencePill active={spacingDensity === "compact"} title="Compact" description="Tight, desktop-like." onClick={() => setSpacingDensity("compact")} />
+            <PreferencePill active={spacingDensity === "comfortable"} title="Comfortable" description="Balanced (default)." onClick={() => setSpacingDensity("comfortable")} />
+            <PreferencePill active={spacingDensity === "spacious"} title="Spacious" description="Relaxed, breathing room." onClick={() => setSpacingDensity("spacious")} />
+            <PreferencePill active={spacingDensity === "airy"} title="Airy" description="Open, minimalist." onClick={() => setSpacingDensity("airy")} />
           </PreferenceGroup>
         </div>
       </SurfaceCard>
@@ -476,86 +669,6 @@ export default function SettingsPage() {
               ))}
             </div>
           </Field>
-
-          <Field label="Accent Color">
-            <div className="space-y-3">
-              <div className="grid grid-cols-6 gap-2">
-                {COLOR_PRESETS.map((c) => {
-                  const selected = accentColor.toLowerCase() === c.hex.toLowerCase();
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => pickAccent(c.hex)}
-                      title={c.name}
-                      aria-label={c.name}
-                      className={`relative h-10 rounded-lg border-2 transition-all ${
-                        selected
-                          ? "border-foreground ring-2 ring-offset-2 ring-foreground/30"
-                          : "border-gray-200 dark:border-gray-700 hover:scale-105"
-                      }`}
-                      style={{ backgroundColor: c.hex }}
-                    >
-                      {selected && (
-                        <CheckCircle
-                          size={16}
-                          className="absolute inset-0 m-auto text-white drop-shadow"
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="flex items-center gap-3">
-                <label
-                  htmlFor="accent-custom"
-                  className="text-xs text-gray-500 dark:text-gray-400 flex-1"
-                >
-                  Or pick a custom color
-                </label>
-                <input
-                  id="accent-custom"
-                  type="color"
-                  value={accentColor}
-                  onChange={(e) => pickAccent(e.target.value)}
-                  className="h-9 w-14 rounded cursor-pointer border border-gray-200 dark:border-gray-700 bg-transparent"
-                />
-                <input
-                  type="text"
-                  value={accentColor}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setAccentColor(v);
-                    if (/^#[0-9a-fA-F]{6}$/.test(v)) applyAccentColor(v);
-                  }}
-                  className={`${inputCls} w-28 font-mono text-xs`}
-                />
-                <button
-                  type="button"
-                  onClick={() => pickAccent(DEFAULT_ACCENT)}
-                  className="text-xs text-gray-500 hover:text-amber-600 underline"
-                >
-                  Reset
-                </button>
-              </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">
-                Preview:&nbsp;
-                <span
-                  className="inline-block px-3 py-1 rounded-md text-white font-medium"
-                  style={{ backgroundColor: accentColor }}
-                >
-                  Button
-                </span>
-                &nbsp;
-                <span
-                  className="inline-block px-3 py-1 rounded-md font-medium border-2"
-                  style={{ borderColor: accentColor, color: accentColor }}
-                >
-                  Outlined
-                </span>
-              </div>
-            </div>
-          </Field>
         </div>
       </Section>
 
@@ -691,6 +804,139 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CustomizationPreview({
+  motionLevel,
+  hoverStyle,
+  surfaceStyle,
+  cornerRadius,
+  blurIntensity,
+  shadowDepth,
+  contrastLevel,
+  typographyWeight,
+  spacingDensity,
+  accentColor,
+}: {
+  motionLevel: MotionLevel;
+  hoverStyle: HoverStyle;
+  surfaceStyle: SurfaceStyle;
+  cornerRadius?: CornerRadius;
+  blurIntensity?: BlurIntensity;
+  shadowDepth?: ShadowDepth;
+  contrastLevel?: ContrastLevel;
+  typographyWeight?: TypographyWeight;
+  spacingDensity?: SpacingDensity;
+  accentColor: string;
+}) {
+  // Get radius class based on selection
+  const radiusClass = cornerRadius === "sharp" ? "rounded-lg" : cornerRadius === "rounded" ? "rounded-xl" : cornerRadius === "smooth" ? "rounded-2xl" : "rounded-3xl";
+
+  return (
+    <div className="rounded-2xl border border-white/80 bg-white/60 backdrop-blur-sm p-6 space-y-4">
+      <div className="text-xs font-semibold uppercase tracking-widest text-stone-500">Live Preview</div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Primary Button */}
+        <button
+          className={`w-full py-3 px-4 text-white font-medium transition-all ${radiusClass}`}
+          style={{
+            backgroundColor: accentColor,
+            transform: hoverStyle === "soft" ? "translateY(-2px)" : hoverStyle === "lifted" ? "translateY(-4px)" : "translateY(-6px)",
+          }}
+        >
+          Primary Button
+        </button>
+
+        {/* Secondary Button */}
+        <button
+          className={`w-full py-3 px-4 font-medium transition-all border-2 ${radiusClass}`}
+          style={{
+            borderColor: accentColor,
+            color: accentColor,
+          }}
+        >
+          Secondary Button
+        </button>
+
+        {/* Card Preview */}
+        <div
+          className={`p-4 space-y-2 ${radiusClass}`}
+          style={{
+            backgroundColor: surfaceStyle === "solid" ? "rgba(255, 255, 255, 0.98)" : surfaceStyle === "balanced" ? "rgba(255, 255, 255, 0.82)" : "rgba(255, 255, 255, 0.65)",
+            backdropFilter: blurIntensity === "minimal" ? "blur(2px)" : blurIntensity === "subtle" ? "blur(4px)" : blurIntensity === "moderate" ? "blur(8px)" : "blur(12px)",
+            border: "1px solid rgba(255, 255, 255, 0.7)",
+          }}
+        >
+          <div
+            className="font-semibold text-sm"
+            style={{
+              fontWeight: typographyWeight === "light" ? 300 : typographyWeight === "regular" ? 400 : typographyWeight === "medium" ? 500 : 600,
+            }}
+          >
+            Card Title
+          </div>
+          <div className="text-xs text-stone-600">Sample card with current customization settings applied.</div>
+        </div>
+
+        {/* Accent Box */}
+        <div
+          className={`p-4 ${radiusClass}`}
+          style={{
+            backgroundColor: accentColor,
+            opacity: contrastLevel === "high" ? 1 : contrastLevel === "enhanced" ? 0.9 : 0.8,
+          }}
+        >
+          <div className="text-white font-medium text-sm">Accent color</div>
+          <div className="text-white/80 text-xs mt-1">Previews accent usage</div>
+        </div>
+      </div>
+
+      {/* Settings Summary */}
+      <div className="pt-3 border-t border-white/40 grid gap-2 text-xs">
+        <div className="flex justify-between">
+          <span className="text-stone-600">Motion:</span>
+          <span className="font-medium capitalize">{motionLevel}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-stone-600">Hover:</span>
+          <span className="font-medium capitalize">{hoverStyle}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-stone-600">Surface:</span>
+          <span className="font-medium capitalize">{surfaceStyle}</span>
+        </div>
+        {(cornerRadius || blurIntensity || shadowDepth || contrastLevel || typographyWeight || spacingDensity) && (
+          <>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Corners:</span>
+              <span className="font-medium capitalize">{cornerRadius || "default"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Blur:</span>
+              <span className="font-medium capitalize">{blurIntensity || "default"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Shadows:</span>
+              <span className="font-medium capitalize">{shadowDepth || "default"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Contrast:</span>
+              <span className="font-medium capitalize">{contrastLevel || "default"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Typography:</span>
+              <span className="font-medium capitalize">{typographyWeight || "default"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Spacing:</span>
+              <span className="font-medium capitalize">{spacingDensity || "default"}</span>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

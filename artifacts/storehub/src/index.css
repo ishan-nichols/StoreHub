@@ -146,6 +146,40 @@
   --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
   --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+
+  /* Enhanced customization features */
+  --radius-sharp: 0px;
+  --radius-rounded: 8px;
+  --radius-smooth: 12px;
+  --radius-organic: 16px;
+  --radius-current: var(--radius-rounded);
+
+  --blur-minimal: blur(2px);
+  --blur-subtle: blur(4px);
+  --blur-moderate: blur(8px);
+  --blur-strong: blur(12px);
+  --blur-current: var(--blur-subtle);
+
+  --shadow-flat: none;
+  --shadow-subtle: 0 1px 3px rgba(0,0,0,0.1);
+  --shadow-lifted: 0 4px 12px rgba(0,0,0,0.15);
+  --shadow-dramatic: 0 20px 40px rgba(0,0,0,0.25);
+  --shadow-current: var(--shadow-subtle);
+
+  --font-weight-light: 300;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 600;
+  --font-weight-current: 400;
+
+  --spacing-compact: 0.75rem;
+  --spacing-comfortable: 1rem;
+  --spacing-spacious: 1.5rem;
+  --spacing-airy: 2rem;
+  --spacing-current: var(--spacing-comfortable);
+
+  --contrast-boost: 1;
+  --saturation-boost: 1;
 }
 
 .dark {
@@ -315,6 +349,24 @@ html[data-motion="reduced"] .nav-motion-item:hover,
 html[data-motion="reduced"] .nav-motion-item:focus-visible {
   transform: none;
   box-shadow: none;
+}
+
+/* Apply customization variables to common components */
+.glass-panel,
+.soft-panel {
+  border-radius: var(--radius-current);
+  backdrop-filter: var(--blur-current);
+}
+
+.motion-card,
+.motion-button {
+  box-shadow: var(--shadow-current);
+  border-radius: var(--radius-current);
+}
+
+/* Apply contrast boost */
+html {
+  filter: saturate(var(--saturation-boost)) contrast(var(--contrast-boost));
 }
 
 @keyframes page-enter {

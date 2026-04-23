@@ -1,5 +1,8 @@
 import { createContext } from "react";
-import type { HoverStyle, Language, MotionLevel, SurfaceStyle, Theme, UIPreferences } from "../schemas";
+import type {
+  HoverStyle, Language, MotionLevel, SurfaceStyle, Theme, UIPreferences,
+  CornerRadius, BlurIntensity, ShadowDepth, ContrastLevel, TypographyWeight, SpacingDensity,
+} from "../schemas";
 import type { Translations } from "../locales";
 import type { UserProfile } from "../schemas";
 
@@ -7,6 +10,14 @@ export interface ResolvedUIPreferences {
   motionLevel: MotionLevel;
   hoverStyle: HoverStyle;
   surfaceStyle: SurfaceStyle;
+  // Optional enhanced customization
+  cornerRadius?: CornerRadius;
+  blurIntensity?: BlurIntensity;
+  shadowDepth?: ShadowDepth;
+  contrastLevel?: ContrastLevel;
+  typographyWeight?: TypographyWeight;
+  spacingDensity?: SpacingDensity;
+  accentColor?: string;
 }
 
 export interface AppContextValue {

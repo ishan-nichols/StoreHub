@@ -4,15 +4,16 @@ import { useApp } from "../contexts/useApp";
 import type { UserProfile, BusinessType, Language, Theme, StoreSize, CurrentSystem, OpeningHours } from "../schemas";
 import { generateId, getCurrencySymbol } from "../utils";
 import { bulkCreateProducts, getSeedProducts, getProducts } from "../services/dataService";
-import { TAX_REGIONS, US_REGIONS, MX_REGIONS, getRegion } from "../data/taxData";
-import { Check, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
+import { TAX_REGIONS, US_REGIONS, MX_REGIONS, getRegion, fmtRate } from "../data/taxData";
+import { Check, ChevronLeft, ChevronRight, ArrowRight, Upload, X, ImageIcon, FileText } from "lucide-react";
+import { applyAccentColor } from "../lib/themeColors";
 
 // ─── Step Sequence ────────────────────────────────────────────────────────────
 
 type StepKey =
-  | "businessName" | "businessType" | "location" | "storeSize" | "currentSystem" | "whichPos"
+  | "businessName" | "businessType" | "logo" | "location" | "storeSize" | "currentSystem" | "whichPos"
   | "painPoints" | "stockOuts" | "supplierStyle" | "scheduleStyle"
-  | "goal" | "storeName" | "storeTaxRate" | "posConnect" | "welcome";
+  | "goal" | "storeName" | "storeTaxRate" | "catalog" | "posConnect" | "welcome";
 
 interface Answers {
   businessName: string;
@@ -36,6 +37,12 @@ interface Answers {
   language: Language;
   currency: string;
   taxRate: number;
+  // Branding
+  logoDataUrl: string;
+  logoAccentColor: string;
+  // Catalog
+  catalogItems: string[];       // product names extracted from uploaded catalog
+  catalogFileName: string;      // original file name (for display)
 }
 
 function getStepSequence(answers: Partial<Answers>): StepKey[] {
@@ -43,6 +50,7 @@ function getStepSequence(answers: Partial<Answers>): StepKey[] {
   return [
     "businessName",
     "businessType",
+    "logo",          // NEW: optional logo upload after business type
     "location",
     "storeSize",
     "currentSystem",
@@ -54,6 +62,7 @@ function getStepSequence(answers: Partial<Answers>): StepKey[] {
     "goal",
     "storeName",
     "storeTaxRate",
+    "catalog",       // NEW: optional menu/catalog upload before final steps
     ...(hasPOS ? ["posConnect" as StepKey] : []),
     "welcome",
   ];
@@ -186,6 +195,59 @@ function generateChecklist(a: Answers): { icon: string; text: string }[] {
   return items.slice(0, 3);
 }
 
+// ─── Logo / Catalog helpers ───────────────────────────────────────────────────
+
+/** Extract the most vibrant (colorful) pixel color from a logo image. */
+function extractLogoColor(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const SIZE = 64; // downsample for speed
+        const canvas = document.createElement("canvas");
+        canvas.width = SIZE; canvas.height = SIZE;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { resolve("#f59e0b"); return; }
+        ctx.drawImage(img, 0, 0, SIZE, SIZE);
+        const { data } = ctx.getImageData(0, 0, SIZE, SIZE);
+
+        let bestR = 0, bestG = 0, bestB = 0, bestScore = -1;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+          if (a < 128) continue;
+          // Skip near-whites and near-blacks
+          const brightness = (r + g + b) / 3;
+          if (brightness > 230 || brightness < 20) continue;
+          // Score = saturation proxy: distance from gray
+          const maxC = Math.max(r, g, b), minC = Math.min(r, g, b);
+          const saturation = maxC === 0 ? 0 : (maxC - minC) / maxC;
+          if (saturation > bestScore) { bestScore = saturation; bestR = r; bestG = g; bestB = b; }
+        }
+
+        if (bestScore < 0) { resolve("#f59e0b"); return; }
+        const hex = [bestR, bestG, bestB].map(v => v.toString(16).padStart(2, "0")).join("");
+        resolve(`#${hex}`);
+      } catch { resolve("#f59e0b"); }
+    };
+    img.onerror = () => resolve("#f59e0b");
+    img.src = dataUrl;
+  });
+}
+
+/** Parse a CSV or plain-text file into a list of product names. */
+function parseCatalogText(text: string): string[] {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const results: string[] = [];
+  for (const line of lines) {
+    // CSV: first column is the name (strip quotes)
+    const name = line.split(",")[0].replace(/^"|"$/g, "").trim();
+    if (name && name.length > 1 && !/^(name|item|product|sku|#)/i.test(name)) {
+      results.push(name);
+    }
+  }
+  return results.slice(0, 30);
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function OnboardingPage() {
@@ -202,9 +264,11 @@ export default function OnboardingPage() {
     supplierStyle: "", scheduleStyle: "", goal: "",
     storeName: "", ownerName: "", posConnect: "",
     language: "en", currency: "USD", taxRate: 8.5,
+    logoDataUrl: "", logoAccentColor: "",
+    catalogItems: [], catalogFileName: "",
   });
 
-  const [stepHistory, setStepHistory] = useState<StepKey[]>(["businessType"]);
+  const [stepHistory, setStepHistory] = useState<StepKey[]>(["businessName"]);
   const currentStep = stepHistory[stepHistory.length - 1];
   const [visible,      setVisible]      = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -322,19 +386,61 @@ export default function OnboardingPage() {
         stateName:        a.stateName || undefined,
         lastUpdated:      new Date().toISOString(),
         businessId:       business.id,
+        logoDataUrl:      a.logoDataUrl || undefined,
+        accentColor:      a.logoAccentColor || undefined,
       } as any;
 
       // Save completion flag synchronously FIRST — before any async work.
-      // This is the single source of truth for startup routing.
+      // Use the same key that getUserProfile() reads from ("storehub_user_profile").
       localStorage.setItem("onboardingComplete", "true");
-      localStorage.setItem("userProfile", JSON.stringify(profile));
+      localStorage.setItem("storehub_user_profile", JSON.stringify(profile));
       console.log("Onboarding saved with business:", business.id);
+
+      // Apply accent color from logo immediately
+      if (a.logoAccentColor) {
+        applyAccentColor(a.logoAccentColor);
+      }
+
+      // Persist store profile to DB so admin dashboard can see it
+      await fetch("/api/onboarding/ensure-store-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storeName: a.storeName.trim(),
+          ownerName: a.ownerName.trim(),
+          businessType: a.businessType,
+          businessId: business.id,
+        }),
+        credentials: "include",
+      });
 
       // Now update React context state (async)
       await setProfile(profile);
 
       if (!isRetake) {
-        await bulkCreateProducts(getSeedProducts(a.businessType));
+        const seedProducts = getSeedProducts(a.businessType);
+        // Merge catalog items as additional products (prepend, no duplicates)
+        if (a.catalogItems.length > 0) {
+          const catalogProducts = a.catalogItems
+            .filter(name => !seedProducts.some((p: { name: string }) => p.name.toLowerCase() === name.toLowerCase()))
+            .map((name: string) => ({
+              id:                generateId(),
+              name,
+              sku:               name.slice(0, 3).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase(),
+              category:          "From Menu",
+              price:             0,
+              quantity:          0,
+              lowStockThreshold: 5,
+              supplierId:        null,
+              unit:              "unit",
+              tags:              ["catalog"],
+              createdAt:         new Date().toISOString(),
+              updatedAt:         new Date().toISOString(),
+            }));
+          await bulkCreateProducts([...catalogProducts, ...seedProducts]);
+        } else {
+          await bulkCreateProducts(seedProducts);
+        }
       }
     } catch (error) {
       console.error("Onboarding failed:", error);
@@ -349,9 +455,12 @@ export default function OnboardingPage() {
 
   async function goToWelcome(currentAnswers: Answers) {
     await saveProfile(currentAnswers);
-    // Navigate directly to dashboard — no intermediate welcome screen detour.
-    console.log("Onboarding complete, redirecting to dashboard");
-    setLocation("/dashboard");
+    // If they chose to connect POS, go to integrations. Otherwise dashboard.
+    if (currentAnswers.posConnect === "yes") {
+      setLocation("/integrations");
+    } else {
+      setLocation("/dashboard");
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -464,6 +573,24 @@ export default function OnboardingPage() {
                 </Step>
               )}
 
+              {/* Step: Logo Upload (optional) */}
+              {currentStep === "logo" && (
+                <LogoStep
+                  logoDataUrl={answers.logoDataUrl}
+                  onLogo={async (dataUrl) => {
+                    const color = await extractLogoColor(dataUrl);
+                    applyAccentColor(color);
+                    setAnswers(prev => ({ ...prev, logoDataUrl: dataUrl, logoAccentColor: color }));
+                  }}
+                  onRemove={() => {
+                    applyAccentColor(null);
+                    setAnswers(prev => ({ ...prev, logoDataUrl: "", logoAccentColor: "" }));
+                  }}
+                  onContinue={() => advanceFrom("logo", answers)}
+                  onSkip={() => advanceFrom("logo", answers)}
+                />
+              )}
+
               {/* Step: Location */}
               {currentStep === "location" && (
                 <Step
@@ -529,7 +656,12 @@ export default function OnboardingPage() {
                                 }`}
                               >
                                 <span className="font-medium">{region.stateName}</span>
-                                <span className="ml-2 text-xs text-gray-400">{(region.salesTaxRate * 100).toFixed(region.salesTaxRate === 0 ? 0 : 2)}%</span>
+                                <span className="ml-2 text-xs text-gray-400">
+                                  {fmtRate(region.stateTaxRate)}
+                                  {(region.countyTaxRate + region.cityTaxRate) > 0 && (
+                                    <> → {fmtRate(region.combinedAvgRate)} avg</>
+                                  )}
+                                </span>
                               </button>
                             ))}
                         </div>
@@ -541,20 +673,48 @@ export default function OnboardingPage() {
                       const region = getRegion(`${answers.country}-${answers.stateCode}`);
                       if (!region) return null;
                       return (
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-sm space-y-1">
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-sm space-y-2">
                           <div className="font-bold text-emerald-800">{region.stateName}</div>
                           {answers.country === "US" ? (
                             <>
-                              <div className="text-emerald-700">Sales tax: <strong>{(region.salesTaxRate * 100).toFixed(region.salesTaxRate === 0 ? 0 : 2)}%</strong> · Min wage: <strong>${region.minimumWageHourly?.toFixed(2)}/hr</strong></div>
+                              {/* Three-tier tax breakdown */}
+                              <div className="rounded-xl bg-white border border-emerald-100 divide-y divide-emerald-50 overflow-hidden">
+                                <div className="flex justify-between items-center px-3 py-1.5 text-xs text-gray-600">
+                                  <span>State tax</span>
+                                  <span className="font-semibold tabular-nums">{fmtRate(region.stateTaxRate)}</span>
+                                </div>
+                                <div className="flex justify-between items-center px-3 py-1.5 text-xs text-gray-600">
+                                  <span>County avg</span>
+                                  <span className="font-semibold tabular-nums">{region.countyTaxRate > 0 ? `+${fmtRate(region.countyTaxRate)}` : "none"}</span>
+                                </div>
+                                <div className="flex justify-between items-center px-3 py-1.5 text-xs text-gray-600">
+                                  <span>City avg</span>
+                                  <span className="font-semibold tabular-nums">{region.cityTaxRate > 0 ? `+${fmtRate(region.cityTaxRate)}` : "none"}</span>
+                                </div>
+                                <div className="flex justify-between items-center px-3 py-2 text-sm bg-emerald-50">
+                                  <span className="font-bold text-emerald-800">Combined avg</span>
+                                  <span className="font-bold text-emerald-700 tabular-nums">{fmtRate(region.combinedAvgRate)}</span>
+                                </div>
+                                {region.combinedMaxRate > region.combinedAvgRate && (
+                                  <div className="flex justify-between items-center px-3 py-1.5 text-xs text-gray-400">
+                                    <span>Max possible in state</span>
+                                    <span className="tabular-nums">{fmtRate(region.combinedMaxRate)}</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex justify-between text-xs text-emerald-700">
+                                <span>Min wage</span>
+                                <span className="font-semibold">${region.minimumWageHourly?.toFixed(2)}/hr</span>
+                              </div>
                               <div className="text-emerald-600 text-xs">{region.incomeTaxNote}</div>
                             </>
                           ) : (
                             <>
-                              <div className="text-emerald-700">IVA: <strong>{(region.salesTaxRate * 100).toFixed(0)}%</strong> · Salario mínimo: <strong>${region.minimumWageDailyMXN?.toFixed(2)} MXN/día</strong></div>
+                              <div className="text-emerald-700">IVA: <strong>{fmtRate(region.stateTaxRate)}</strong> · Salario mínimo: <strong>${region.minimumWageDailyMXN?.toFixed(2)} MXN/día</strong></div>
                               <div className="text-emerald-600 text-xs">{region.incomeTaxNote}</div>
                             </>
                           )}
-                          {region.specialNotes && <div className="text-gray-500 text-xs italic">{region.specialNotes}</div>}
+                          {region.specialNotes && <div className="text-gray-400 text-xs italic">{region.specialNotes}</div>}
                         </div>
                       );
                     })()}
@@ -809,6 +969,40 @@ export default function OnboardingPage() {
                 </Step>
               )}
 
+              {/* Step: Catalog / Menu Upload (optional) */}
+              {currentStep === "catalog" && (
+                <CatalogStep
+                  fileName={answers.catalogFileName}
+                  itemCount={answers.catalogItems.length}
+                  businessType={answers.businessType}
+                  onFile={async (file) => {
+                    const text = await file.text().catch(() => "");
+                    const items = parseCatalogText(text);
+                    setAnswers(prev => ({
+                      ...prev,
+                      catalogFileName: file.name,
+                      catalogItems: items,
+                    }));
+                  }}
+                  onRemove={() => setAnswers(prev => ({ ...prev, catalogFileName: "", catalogItems: [] }))}
+                  onContinue={async () => {
+                    const seq = getStepSequence(answers);
+                    const idx = seq.indexOf("catalog");
+                    const next = seq[idx + 1];
+                    if (next === "welcome") { await goToWelcome(answers); }
+                    else { advanceFrom("catalog", answers); }
+                  }}
+                  onSkip={async () => {
+                    const seq = getStepSequence(answers);
+                    const idx = seq.indexOf("catalog");
+                    const next = seq[idx + 1];
+                    if (next === "welcome") { await goToWelcome(answers); }
+                    else { advanceFrom("catalog", answers); }
+                  }}
+                  isSaving={isSaving}
+                />
+              )}
+
               {/* Step 10: POS Connect (conditional) */}
               {currentStep === "posConnect" && (
                 <Step question={`Want to connect your ${posName} now?`} sub="We'll pull your real products and sales data automatically.">
@@ -933,5 +1127,214 @@ function MultiBtn({ selected, onClick, emoji, label }: {
         {selected && <Check size={11} className="text-white" />}
       </div>
     </button>
+  );
+}
+
+// ─── Logo Step ────────────────────────────────────────────────────────────────
+
+function LogoStep({ logoDataUrl, onLogo, onRemove, onContinue, onSkip }: {
+  logoDataUrl: string;
+  onLogo: (dataUrl: string) => Promise<void>;
+  onRemove: () => void;
+  onContinue: () => void;
+  onSkip: () => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    setLoading(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string;
+      await onLogo(dataUrl);
+      setLoading(false);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <Step question="Add your store logo" sub="Optional — your logo appears in the app and sets your color theme automatically.">
+      <div className="space-y-4">
+        {logoDataUrl ? (
+          <div className="relative flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-amber-300 bg-amber-50">
+            <img src={logoDataUrl} alt="Logo preview" className="max-h-28 max-w-full object-contain rounded-xl" />
+            <button
+              onClick={onRemove}
+              className="absolute top-3 right-3 p-1 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-300 transition-colors"
+            >
+              <X size={14} />
+            </button>
+            <p className="text-xs text-amber-700 font-medium">Looking good! We picked a color from your logo.</p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => {
+              e.preventDefault();
+              setDragging(false);
+              const file = e.dataTransfer.files[0];
+              if (file) handleFile(file);
+            }}
+            className={`w-full flex flex-col items-center gap-3 py-10 rounded-2xl border-2 border-dashed transition-all ${
+              dragging
+                ? "border-amber-400 bg-amber-50"
+                : "border-gray-200 bg-white hover:border-amber-300 hover:bg-amber-50/40"
+            }`}
+          >
+            {loading ? (
+              <div className="w-8 h-8 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 flex items-center justify-center">
+                  <ImageIcon size={22} className="text-amber-500" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-gray-700">Drop your logo here</p>
+                  <p className="text-xs text-gray-400 mt-0.5">or click to browse · PNG, JPG, SVG, WEBP</p>
+                </div>
+              </>
+            )}
+          </button>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+        />
+
+        {logoDataUrl && (
+          <button
+            onClick={onContinue}
+            className="w-full flex items-center justify-center gap-2 py-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl text-base transition-colors"
+          >
+            Continue <ChevronRight size={18} />
+          </button>
+        )}
+        <button
+          onClick={onSkip}
+          className="w-full text-center text-sm text-gray-400 hover:text-gray-600 transition-colors py-1"
+        >
+          {logoDataUrl ? "Continue without logo" : "Skip for now"}
+        </button>
+      </div>
+    </Step>
+  );
+}
+
+// ─── Catalog Step ─────────────────────────────────────────────────────────────
+
+function CatalogStep({ fileName, itemCount, businessType, onFile, onRemove, onContinue, onSkip, isSaving }: {
+  fileName: string;
+  itemCount: number;
+  businessType: BusinessType;
+  onFile: (file: File) => Promise<void>;
+  onRemove: () => void;
+  onContinue: () => Promise<void>;
+  onSkip: () => Promise<void>;
+  isSaving: boolean;
+}) {
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const EXAMPLE_LABELS: Record<string, string> = {
+    restaurant: "menu PDF or CSV",
+    bakery: "product list or price sheet",
+    grocery: "product catalog or price list",
+    cstore: "product list",
+    butcher: "cut list or price sheet",
+    liquor: "catalog CSV",
+    clothing: "product catalog",
+    other: "product list or catalog",
+  };
+  const example = EXAMPLE_LABELS[businessType] ?? "product list or catalog";
+
+  async function handleFile(file: File) {
+    setLoading(true);
+    await onFile(file);
+    setLoading(false);
+  }
+
+  return (
+    <Step
+      question="Upload your menu or product catalog"
+      sub={`Optional — upload your ${example} and we'll pre-fill your inventory.`}
+    >
+      <div className="space-y-4">
+        {fileName ? (
+          <div className="flex items-start gap-3 p-4 rounded-2xl border-2 border-emerald-300 bg-emerald-50">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+              <FileText size={18} className="text-emerald-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-emerald-800 truncate">{fileName}</p>
+              {itemCount > 0 ? (
+                <p className="text-xs text-emerald-600 mt-0.5">
+                  Found <strong>{itemCount} products</strong> — we'll add them to your inventory
+                </p>
+              ) : (
+                <p className="text-xs text-emerald-600 mt-0.5">
+                  File uploaded — our team will help import your products
+                </p>
+              )}
+            </div>
+            <button onClick={onRemove} className="p-1 rounded-full text-gray-400 hover:text-red-500 transition-colors">
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="w-full flex flex-col items-center gap-3 py-10 rounded-2xl border-2 border-dashed border-gray-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/40 transition-all"
+          >
+            {loading ? (
+              <div className="w-8 h-8 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 flex items-center justify-center">
+                  <Upload size={22} className="text-emerald-500" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-gray-700">Drop your catalog here</p>
+                  <p className="text-xs text-gray-400 mt-0.5">CSV, TXT · Image support coming soon</p>
+                </div>
+              </>
+            )}
+          </button>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv,.txt,text/csv,text/plain"
+          className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+        />
+
+        {fileName && (
+          <button
+            onClick={onContinue}
+            disabled={isSaving}
+            className="w-full flex items-center justify-center gap-2 py-4 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white font-bold rounded-2xl text-base transition-colors"
+          >
+            {isSaving ? "Saving…" : <><span>Finish setup</span> <ChevronRight size={18} /></>}
+          </button>
+        )}
+        <button
+          onClick={onSkip}
+          disabled={isSaving}
+          className="w-full text-center text-sm text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-colors py-1"
+        >
+          {isSaving ? "Saving…" : fileName ? "Skip catalog import" : "Skip for now"}
+        </button>
+      </div>
+    </Step>
   );
 }

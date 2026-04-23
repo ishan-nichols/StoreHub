@@ -45,6 +45,7 @@ export default function AIChatWidget() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const focusTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -76,9 +77,21 @@ export default function AIChatWidget() {
       ]);
     }
     if (open) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+      if (focusTimeoutRef.current) window.clearTimeout(focusTimeoutRef.current);
+      focusTimeoutRef.current = window.setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [open]);
+  }, [open, messages.length, profile?.ownerName]);
+
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) {
+        abortRef.current.abort();
+      }
+      if (focusTimeoutRef.current) {
+        window.clearTimeout(focusTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -128,6 +141,10 @@ export default function AIChatWidget() {
   }
 
   function startNewChat() {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     setMessages([]);
     setConvId(null);
     localConvId = null;
@@ -140,7 +157,8 @@ export default function AIChatWidget() {
         id: generateMsgId(),
       },
     ]);
-    setTimeout(() => inputRef.current?.focus(), 100);
+    if (focusTimeoutRef.current) window.clearTimeout(focusTimeoutRef.current);
+    focusTimeoutRef.current = window.setTimeout(() => inputRef.current?.focus(), 100);
   }
 
   async function ensureConversation(): Promise<number> {
@@ -300,6 +318,7 @@ Respond in ${profile.language === "es" ? "Spanish" : "English"}. Be concise, fri
       }
     } finally {
       setLoading(false);
+      abortRef.current = null;
     }
   }
 

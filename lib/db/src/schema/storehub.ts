@@ -62,11 +62,43 @@ export const storeProfiles = pgTable("store_profiles", {
   scheduleStyle:       varchar("schedule_style",   { length: 50 }),
   goal:                varchar("goal",             { length: 50 }),
   storageMode:         varchar("storage_mode",     { length: 20 }).notNull().default("cloud"), // 'cloud' | 'local'
+  /** Wizard answers + dismissed UI prompts (e.g. tax confirmation ids) */
+  onboardingProgress: jsonb("onboarding_progress").notNull().default({}),
+  onboardingCurrentStep: varchar("onboarding_current_step", { length: 100 }),
+  storeLatitude:       doublePrecision("store_latitude"),
+  storeLongitude:      doublePrecision("store_longitude"),
+  /** e.g. US-TX — set when user confirms jurisdiction to avoid duplicate tax prompts */
+  taxJurisdictionKey:  varchar("tax_jurisdiction_key", { length: 64 }),
+  taxJurisdictionConfirmedAt: timestamp("tax_jurisdiction_confirmed_at", { withTimezone: true }),
   createdAt:           timestamp("created_at",     { withTimezone: true }).notNull().defaultNow(),
   lastUpdated:         timestamp("last_updated",   { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   businessIdIdx: index("store_profiles_business_id_idx").on(table.businessId),
 }));
+
+// ─── Store locations (multi-location per store owner) ───────────────────────
+export const storeLocations = pgTable("store_locations", {
+  id:            uuid("id").primaryKey().defaultRandom(),
+  userId:        userRef(),
+  businessId:    uuid("business_id").references(() => businesses.id, { onDelete: "set null" }),
+  name:          varchar("name", { length: 255 }).notNull(),
+  isDefault:     boolean("is_default").notNull().default(false),
+  addressLine1:  varchar("address_line1", { length: 500 }),
+  city:          varchar("city", { length: 255 }),
+  stateCode:     varchar("state_code", { length: 20 }),
+  postalCode:    varchar("postal_code", { length: 32 }),
+  country:       varchar("country", { length: 2 }),
+  latitude:      doublePrecision("latitude"),
+  longitude:     doublePrecision("longitude"),
+  taxRateOverride: doublePrecision("tax_rate_override"),
+  createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  byUser: index("store_locations_user_idx").on(t.userId),
+  byBusiness: index("store_locations_business_id_idx").on(t.businessId),
+}));
+
+export type StoreLocation = typeof storeLocations.$inferSelect;
+export type InsertStoreLocation = typeof storeLocations.$inferInsert;
 
 // ─── Suppliers ──────────────────────────────────────────────────────────────
 export const suppliers = pgTable("suppliers", {

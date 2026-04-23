@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type { UIPreferences, UserProfile } from "../schemas";
 import { getUserProfile, saveUserProfile, trackFeatureUsage } from "../services/dataService";
 import { processScheduledChanges } from "../services/pricingService";
@@ -91,28 +91,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return defaults.sort((a, b) => (counts[b] ?? 0) - (counts[a] ?? 0));
   }, [profile]);
 
-  const t = getTranslations(profile?.language ?? "en");
+  const t = useMemo(() => getTranslations(profile?.language ?? "en"), [profile?.language]);
   const theme = profile?.theme ?? "light";
   const language = profile?.language ?? "en";
   const currencySymbol = profile?.currencySymbol ?? "$";
+  const isOnboarded = syncOnboarded || (!isLoading && profile?.onboardingCompleted === true);
+
+  const contextValue = useMemo(() => ({
+    profile,
+    isLoading,
+    isOnboarded,
+    t,
+    theme,
+    language,
+    currencySymbol,
+    setProfile,
+    refreshProfile,
+    trackFeature,
+    getFeatureOrder,
+    uiPreferences,
+    updateUIPreferences,
+  }), [
+    profile,
+    isLoading,
+    isOnboarded,
+    t,
+    theme,
+    language,
+    currencySymbol,
+    setProfile,
+    refreshProfile,
+    trackFeature,
+    getFeatureOrder,
+    uiPreferences,
+    updateUIPreferences,
+  ]);
 
   return (
     <AppContext.Provider
-      value={{
-        profile,
-        isLoading,
-        isOnboarded: syncOnboarded || (!isLoading && profile?.onboardingCompleted === true),
-        t,
-        theme,
-        language,
-        currencySymbol,
-        setProfile,
-        refreshProfile,
-        trackFeature,
-        getFeatureOrder,
-        uiPreferences,
-        updateUIPreferences,
-      }}
+      value={contextValue}
     >
       {children}
     </AppContext.Provider>
@@ -124,6 +141,13 @@ function resolveUIPreferences(preferences?: UIPreferences): ResolvedUIPreference
     motionLevel: preferences?.motionLevel ?? DEFAULT_UI_PREFERENCES.motionLevel,
     hoverStyle: preferences?.hoverStyle ?? DEFAULT_UI_PREFERENCES.hoverStyle,
     surfaceStyle: preferences?.surfaceStyle ?? DEFAULT_UI_PREFERENCES.surfaceStyle,
+    cornerRadius: preferences?.cornerRadius,
+    blurIntensity: preferences?.blurIntensity,
+    shadowDepth: preferences?.shadowDepth,
+    contrastLevel: preferences?.contrastLevel,
+    typographyWeight: preferences?.typographyWeight,
+    spacingDensity: preferences?.spacingDensity,
+    accentColor: preferences?.accentColor,
   };
 }
 
@@ -204,10 +228,62 @@ function applyUIPreferences(preferences?: UIPreferences) {
     },
   };
 
+  // Enhanced customization variables
+  const cornerRadiusVars: Record<string, string> = {
+    sharp: "--radius-current",
+    rounded: "--radius-current",
+    smooth: "--radius-current",
+    organic: "--radius-current",
+  };
+
+  const blurIntensityVars: Record<string, string> = {
+    minimal: "--blur-minimal",
+    subtle: "--blur-subtle",
+    moderate: "--blur-moderate",
+    strong: "--blur-strong",
+  };
+
+  const shadowDepthVars: Record<string, string> = {
+    flat: "--shadow-flat",
+    subtle: "--shadow-subtle",
+    lifted: "--shadow-lifted",
+    dramatic: "--shadow-dramatic",
+  };
+
+  const typographyWeightVars: Record<string, string> = {
+    light: "--font-weight-light",
+    regular: "--font-weight-regular",
+    medium: "--font-weight-medium",
+    bold: "--font-weight-bold",
+  };
+
+  const spacingDensityVars: Record<string, string> = {
+    compact: "--spacing-compact",
+    comfortable: "--spacing-comfortable",
+    spacious: "--spacing-spacious",
+    airy: "--spacing-airy",
+  };
+
   const merged = {
     ...motionVars[resolved.motionLevel],
     ...surfaceVars[resolved.surfaceStyle],
     ...hoverVars[resolved.hoverStyle],
+    ...(resolved.cornerRadius && { "--radius-current": `var(--radius-${resolved.cornerRadius})` }),
+    ...(resolved.blurIntensity && { "--blur-current": `var(${blurIntensityVars[resolved.blurIntensity]})` }),
+    ...(resolved.shadowDepth && { "--shadow-current": `var(${shadowDepthVars[resolved.shadowDepth]})` }),
+    ...(resolved.typographyWeight && { "--font-weight-current": `var(${typographyWeightVars[resolved.typographyWeight]})` }),
+    ...(resolved.spacingDensity && { "--spacing-current": `var(${spacingDensityVars[resolved.spacingDensity]})` }),
+    ...(resolved.contrastLevel && {
+      "--contrast-boost": resolved.contrastLevel === "high" ? "1.5" : resolved.contrastLevel === "enhanced" ? "1.2" : "1",
+      "--saturation-boost": resolved.contrastLevel === "high" ? "1.4" : resolved.contrastLevel === "enhanced" ? "1.1" : "1",
+    }),
+    ...(resolved.accentColor && {
+      "--primary": resolved.accentColor,
+      "--ring": resolved.accentColor,
+      "--sidebar-primary": resolved.accentColor,
+      "--sidebar-ring": resolved.accentColor,
+      "--chart-1": resolved.accentColor,
+    }),
   };
 
   Object.entries(merged).forEach(([key, value]) => root.style.setProperty(key, value));

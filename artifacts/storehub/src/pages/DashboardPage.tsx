@@ -108,6 +108,14 @@ export default function DashboardPage() {
     });
   }, [profile]);
 
+  useEffect(() => {
+    return () => {
+      if (reportAbortRef.current) {
+        reportAbortRef.current.abort();
+      }
+    };
+  }, []);
+
   function dismissChecklist() {
     localStorage.setItem(CHECKLIST_KEY, "1");
     setChecklistDismissed(true);
@@ -217,6 +225,7 @@ export default function DashboardPage() {
       }
     } finally {
       setReportGenerating(false);
+      reportAbortRef.current = null;
     }
   }
 

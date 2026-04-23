@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, sql, gte, lte, sum } from "drizzle-orm";
+import { eq, and, sql, gte, lte, sum, inArray } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   storeProfiles, products, sales, expenses, suppliers,
@@ -9,6 +9,8 @@ import {
 } from "@workspace/db";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import { buildCrudRouter } from "./crud.js";
+import salesTaxRouter from "./salesTax.js";
+import locationsRouter from "./locations.js";
 
 const router: IRouter = Router();
 
@@ -42,6 +44,8 @@ profileRouter.put("/", async (req, res) => {
 });
 
 router.use("/profile", profileRouter);
+router.use("/sales-tax", salesTaxRouter);
+router.use("/locations", locationsRouter);
 
 // ─── Standard per-user collections via factory ─────────────────────────────
 router.use("/products",           buildCrudRouter({ table: products,              userIdCol: products.userId,              idCol: products.id,              orderByCol: products.createdAt }));
@@ -352,10 +356,10 @@ router.post("/menu/sell", requireAuth, async (req, res) => {
 
   try {
     const result = await db.transaction(async (tx) => {
-      // Load all menu items
-      const menuItemIds = items.map((i) => i.menuItemId);
+      // Load only requested menu items
+      const menuItemIds = [...new Set(items.map((i) => i.menuItemId))];
       const loadedMenuItems = await tx.select().from(menuItems)
-        .where(and(eq(menuItems.userId, req.userId!)));
+        .where(and(eq(menuItems.userId, req.userId!), inArray(menuItems.id, menuItemIds)));
       const menuItemMap = new Map(loadedMenuItems.map((m) => [m.id, m]));
 
       // Validate all items belong to user
@@ -372,13 +376,19 @@ router.post("/menu/sell", requireAuth, async (req, res) => {
 
       const recipeMap = new Map<string, typeof recipes.$inferSelect>();
       const riMap = new Map<string, (typeof recipeIngredients.$inferSelect)[]>();
-
-      for (const rId of recipeIds) {
-        const [recipe] = await tx.select().from(recipes).where(eq(recipes.id, rId));
-        if (recipe) {
-          recipeMap.set(rId, recipe);
-          const ris = await tx.select().from(recipeIngredients).where(eq(recipeIngredients.recipeId, rId));
-          riMap.set(rId, ris);
+      if (recipeIds.length > 0) {
+        const loadedRecipes = await tx.select().from(recipes).where(inArray(recipes.id, recipeIds));
+        for (const recipe of loadedRecipes) {
+          recipeMap.set(recipe.id, recipe);
+        }
+        const loadedRecipeIngredients = await tx
+          .select()
+          .from(recipeIngredients)
+          .where(inArray(recipeIngredients.recipeId, recipeIds));
+        for (const ri of loadedRecipeIngredients) {
+          const current = riMap.get(ri.recipeId) ?? [];
+          current.push(ri);
+          riMap.set(ri.recipeId, current);
         }
       }
 
@@ -472,10 +482,24 @@ router.get("/payroll/report", requireAuth, async (req, res) => {
     );
     const dailyInRange = await dailyQuery;
 
+    const shiftsByEmployee = new Map<string, typeof shifts.$inferSelect[]>();
+    for (const shift of shiftsInRange) {
+      if (shift.hoursWorked === null) continue;
+      const current = shiftsByEmployee.get(shift.employeeId) ?? [];
+      current.push(shift);
+      shiftsByEmployee.set(shift.employeeId, current);
+    }
+    const dailyByEmployee = new Map<string, typeof dailyPayRecords.$inferSelect[]>();
+    for (const daily of dailyInRange) {
+      const current = dailyByEmployee.get(daily.employeeId) ?? [];
+      current.push(daily);
+      dailyByEmployee.set(daily.employeeId, current);
+    }
+
     const report = emps.map((emp) => {
       const empPayrollType = emp.payrollType ?? "hourly";
       if (empPayrollType === "hourly") {
-        const empShifts = shiftsInRange.filter((s) => s.employeeId === emp.id && s.hoursWorked !== null);
+        const empShifts = shiftsByEmployee.get(emp.id) ?? [];
         const hoursWorked = empShifts.reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
         const estimatedPay = hoursWorked * (emp.hourlyWage ?? 0);
         return {
@@ -485,7 +509,7 @@ router.get("/payroll/report", requireAuth, async (req, res) => {
           shifts: empShifts,
         };
       } else {
-        const empDailyRecords = dailyInRange.filter((d) => d.employeeId === emp.id);
+        const empDailyRecords = dailyByEmployee.get(emp.id) ?? [];
         const estimatedPay = empDailyRecords.reduce((sum, d) => sum + parseFloat(d.totalPay as string), 0);
         return {
           employee: { id: emp.id, name: emp.name, role: emp.role, payrollType: empPayrollType },

@@ -67,7 +67,22 @@ export default function BarcodeScanner({ onClose, onResult }: Props) {
 
     (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const md = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+        if (!md?.getUserMedia) {
+          if (!mounted) return;
+          const secure =
+            typeof globalThis !== "undefined" &&
+            "isSecureContext" in globalThis &&
+            (globalThis as { isSecureContext?: boolean }).isSecureContext === false;
+          setStatus(secure ? "error" : "no-camera");
+          setErrorMsg(
+            secure
+              ? "Camera requires a secure context (HTTPS). Open StoreHub over HTTPS or use manual entry."
+              : "This browser does not expose camera APIs (mediaDevices). Use manual entry or a supported browser.",
+          );
+          return;
+        }
+        const stream = await md.getUserMedia({
           video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
         });
         if (!mounted) { stream.getTracks().forEach((t) => t.stop()); return; }

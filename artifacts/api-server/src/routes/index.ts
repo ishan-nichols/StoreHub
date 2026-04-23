@@ -11,6 +11,8 @@ import storehubRouter from "./storehub/index.js";
 import adminRouter from "./admin/index.js";
 import businessesRouter from "./businesses/index.js";
 import onboardingRouter from "./onboarding/index.js";
+import analyticsRouter from "./analytics/index.js";
+import integrationsRouter from "./integrations/index.js";
 
 const router: IRouter = Router();
 
@@ -26,5 +28,7 @@ router.use("/store",       storehubRouter);
 router.use("/admin",       adminRouter);
 router.use("/businesses",  businessesRouter);
 router.use("/onboarding",  onboardingRouter);
+router.use("/analytics",   analyticsRouter);
+router.use("/integrations", integrationsRouter);
 
 export default router;

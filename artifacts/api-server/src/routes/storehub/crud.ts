@@ -42,12 +42,19 @@ export function buildCrudRouter(opts: CrudTable): IRouter {
   }
 
   router.get("/", async (req, res) => {
+    const requestedLimit = Number.parseInt(String(req.query.limit ?? "50"), 10);
+    const requestedOffset = Number.parseInt(String(req.query.offset ?? "0"), 10);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 200) : 50;
+    const offset = Number.isFinite(requestedOffset) ? Math.max(requestedOffset, 0) : 0;
     const whereClause = buildWhereClause(req.userId!, req.userRole, req.businessId);
     let query = (db as any).select().from(table);
     if (whereClause) {
       query = query.where(whereClause);
     }
-    const rows = await query.orderBy(orderByCol ? desc(orderByCol) : desc(idCol));
+    const rows = await query
+      .orderBy(orderByCol ? desc(orderByCol) : desc(idCol))
+      .limit(limit)
+      .offset(offset);
     res.json(rows);
   });
 

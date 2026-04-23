@@ -79,6 +79,10 @@ function RestaurantPOS() {
     () => activeCategory === "All" ? menuItems : menuItems.filter((i) => i.category === activeCategory),
     [menuItems, activeCategory],
   );
+  const cartByMenuItemId = useMemo(
+    () => new Map(cart.map((item) => [item.menuItemId, item])),
+    [cart],
+  );
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
@@ -169,7 +173,7 @@ function RestaurantPOS() {
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {filtered.map((item) => {
-                const inCart = cart.find((c) => c.menuItemId === item.id);
+                const inCart = cartByMenuItemId.get(item.id);
                 return (
                   <button
                     key={item.id}
@@ -410,6 +414,10 @@ function RetailPOSPage() {
   );
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const cartByProductId = useMemo(
+    () => new Map(cart.map((item) => [item.productId, item])),
+    [cart],
+  );
   const taxRate = profile?.taxRate ?? 0;
   const tax = parseFloat(((subtotal * taxRate) / 100).toFixed(2));
   const total = subtotal + tax;
@@ -528,7 +536,7 @@ function RetailPOSPage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {filtered.map((product) => {
-                  const inCart = cart.find((item) => item.productId === product.id);
+                  const inCart = cartByProductId.get(product.id);
                   return (
                     <button
                       key={product.id}

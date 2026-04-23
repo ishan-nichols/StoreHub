@@ -7,6 +7,12 @@ export type CurrentSystem = "paper" | "spreadsheets" | "pos" | "multiple";
 export type MotionLevel = "reduced" | "gentle" | "expressive";
 export type HoverStyle = "soft" | "lifted" | "dramatic";
 export type SurfaceStyle = "glass" | "balanced" | "solid";
+export type CornerRadius = "sharp" | "rounded" | "smooth" | "organic";
+export type BlurIntensity = "minimal" | "subtle" | "moderate" | "strong";
+export type ShadowDepth = "flat" | "subtle" | "lifted" | "dramatic";
+export type ContrastLevel = "standard" | "enhanced" | "high";
+export type TypographyWeight = "light" | "regular" | "medium" | "bold";
+export type SpacingDensity = "compact" | "comfortable" | "spacious" | "airy";
 
 export interface OpeningHours {
   open: string;
@@ -15,9 +21,19 @@ export interface OpeningHours {
 }
 
 export interface UIPreferences {
+  // Basic experience
   motionLevel?: MotionLevel;
   hoverStyle?: HoverStyle;
   surfaceStyle?: SurfaceStyle;
+  accentColor?: string;
+
+  // Enhanced experience (Apple design philosophy)
+  cornerRadius?: CornerRadius;
+  blurIntensity?: BlurIntensity;
+  shadowDepth?: ShadowDepth;
+  contrastLevel?: ContrastLevel;
+  typographyWeight?: TypographyWeight;
+  spacingDensity?: SpacingDensity;
 }
 
 export interface UserProfile {
@@ -61,6 +77,9 @@ export interface UserProfile {
 
   // ── Business relationship ──────────────────────────────────────────────────
   businessId?: string;
+
+  // ── Branding ──────────────────────────────────────────────────────────────
+  logoDataUrl?: string;        // base64 data URL of the store logo
 }
 
 export type PosSyncStatus = "synced" | "pending" | "failed" | "not_connected";

@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -44,5 +44,16 @@ app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 
 app.use("/api", router);
+
+// ─── JSON error handler (must have 4 params so Express treats it as error middleware) ───
+// Replaces Express's default HTML error page with a JSON response for every API error.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  logger.error({ err }, "Unhandled error");
+  const status = (err as Error & { status?: number; statusCode?: number }).status
+    ?? (err as Error & { status?: number; statusCode?: number }).statusCode
+    ?? 500;
+  res.status(status).json({ error: err.message ?? "Internal server error" });
+});
 
 export default app;

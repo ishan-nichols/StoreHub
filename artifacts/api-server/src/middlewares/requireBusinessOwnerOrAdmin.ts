@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../lib/auth.js";
-import { db } from "@storehub/db";
-import { users } from "@storehub/db/schema";
+import { db } from "@workspace/db";
+import { users } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 
 export async function requireBusinessOwnerOrAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {

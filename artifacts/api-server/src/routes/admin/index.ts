@@ -8,11 +8,11 @@ import { eq, sql, desc } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   users, storeProfiles, products, sales, expenses,
-  employees, shifts, suppliers,
+  employees, shifts, suppliers, analyticsEvents,
 } from "@workspace/db";
 import { requireAdmin } from "../../middlewares/requireAdmin.js";
 import {
-  hashPassword, generateOpaqueToken,
+  hashPassword, generateOpaqueToken, validatePasswordStrength,
 } from "../../lib/auth.js";
 
 const router = Router();
@@ -58,7 +58,7 @@ router.get("/stats", async (_req, res) => {
 router.get("/stores", async (_req, res) => {
   const rows = await db
     .select({
-      userId:              storeProfiles.userId,
+      userId:              users.id,
       storeName:           storeProfiles.storeName,
       ownerName:           storeProfiles.ownerName,
       businessType:        storeProfiles.businessType,
@@ -70,16 +70,19 @@ router.get("/stores", async (_req, res) => {
       email:               users.email,
       fullName:            users.fullName,
       role:                users.role,
+      businessId:          users.businessId,
       userCreatedAt:       users.createdAt,
       lastLoginAt:         users.lastLoginAt,
+      profileMissing:      sql<boolean>`${storeProfiles.userId} is null`,
     })
-    .from(storeProfiles)
-    .innerJoin(users, eq(storeProfiles.userId, users.id))
-    .orderBy(desc(storeProfiles.createdAt));
+    .from(users)
+    .leftJoin(storeProfiles, eq(users.id, storeProfiles.userId))
+    .where(eq(users.role, "store_owner"))
+    .orderBy(desc(users.createdAt));
 
   // Attach quick stats per store
   const withStats = await Promise.all(
-    rows.map(async (store) => {
+    rows.map(async (store: (typeof rows)[number]) => {
       const [{ revenue }] = await db
         .select({ revenue: sql<number>`coalesce(sum(total), 0)` })
         .from(sales)
@@ -107,14 +110,14 @@ router.get("/stores", async (_req, res) => {
 router.get("/stores/:userId", async (req, res) => {
   const { userId } = req.params;
 
-  const [profile] = await db.select().from(storeProfiles).where(eq(storeProfiles.userId, userId));
-  if (!profile) return res.status(404).json({ error: "Store not found" });
-
   const [user] = await db.select({
     id: users.id, email: users.email, fullName: users.fullName,
     role: users.role, emailVerified: users.emailVerified,
     phoneNumber: users.phoneNumber, createdAt: users.createdAt, lastLoginAt: users.lastLoginAt,
   }).from(users).where(eq(users.id, userId));
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const [profile] = await db.select().from(storeProfiles).where(eq(storeProfiles.userId, userId));
 
   const [{ revenue }] = await db
     .select({ revenue: sql<number>`coalesce(sum(total), 0)` })
@@ -142,7 +145,8 @@ router.get("/stores/:userId", async (req, res) => {
 
   return res.json({
     user,
-    profile,
+    profile: profile ?? null,
+    profileMissing: !profile,
     stats: { revenue, expenseTotal, saleCount, productCount, employeeCount, supplierCount },
   });
 });
@@ -222,10 +226,23 @@ router.post("/stores", async (req, res) => {
     return res.status(400).json({ error: "email, fullName, and storeName are required" });
   }
 
+  if (password !== undefined && password !== null) {
+    const pw = String(password).trim();
+    if (pw.length === 0) {
+      return res.status(400).json({ error: "Password cannot be blank" });
+    }
+    const strength = validatePasswordStrength(pw);
+    if (!strength.valid) {
+      return res.status(400).json({ error: strength.reason ?? "Password does not meet policy" });
+    }
+  }
+
   const [existing] = await db.select().from(users).where(eq(users.email, email.toLowerCase())).limit(1);
   if (existing) return res.status(409).json({ error: "An account with that email already exists" });
 
-  const tempPassword = password ?? generateOpaqueToken(8);
+  const tempPassword = password !== undefined && password !== null && String(password).trim() !== ""
+    ? String(password).trim()
+    : generateOpaqueToken(8);
   const passwordHash = await hashPassword(tempPassword);
 
   const [user] = await db.insert(users).values({
@@ -251,7 +268,40 @@ router.post("/stores", async (req, res) => {
     email: user.email,
     fullName: user.fullName,
     tempPassword,
-    message: "Store account created. Share the temp password with the store owner.",
+    message:
+      "Store account created. Passwords cannot be retrieved later (one-way hash). Share this temporary password securely, or use POST /admin/stores/:userId/reset-password to issue a new one.",
+  });
+});
+
+// ─── Reset store owner password (one-time plaintext in response — same as create) ─
+
+router.post("/stores/:userId/reset-password", async (req, res) => {
+  const { userId } = req.params;
+  const { password } = (req.body ?? {}) as { password?: string };
+
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) return res.status(404).json({ error: "Store not found" });
+  if (user.role === "superadmin") return res.status(403).json({ error: "Cannot reset admin passwords here" });
+
+  let plain: string;
+  if (password !== undefined && password !== null && String(password).trim() !== "") {
+    const pw = String(password).trim();
+    const strength = validatePasswordStrength(pw);
+    if (!strength.valid) {
+      return res.status(400).json({ error: strength.reason ?? "Password does not meet policy" });
+    }
+    plain = pw;
+  } else {
+    plain = generateOpaqueToken(12);
+  }
+
+  const passwordHash = await hashPassword(plain);
+  await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+
+  return res.json({
+    tempPassword: plain,
+    message:
+      "Passwords are stored with a one-way hash and cannot be viewed. This response is the only time the new password appears — copy it now or trigger email reset when available.",
   });
 });
 
@@ -262,6 +312,13 @@ router.delete("/stores/:userId", async (req, res) => {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) return res.status(404).json({ error: "Store not found" });
   if (user.role === "superadmin") return res.status(403).json({ error: "Cannot delete admin accounts" });
+
+  await db.insert(analyticsEvents).values({
+    userId,
+    actorUserId: req.userId,
+    eventName: "account_deleted",
+    properties: { email: user.email, role: user.role, deletedBy: "superadmin" },
+  });
 
   await db.delete(users).where(eq(users.id, userId)); // cascades to all store data
   return res.json({ ok: true });

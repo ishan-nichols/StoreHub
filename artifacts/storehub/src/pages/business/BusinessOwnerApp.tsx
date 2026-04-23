@@ -1,18 +1,26 @@
 import { Switch, Route, Redirect } from "wouter";
-import Layout from "../../components/Layout";
-import BusinessDashboardPage from "./BusinessDashboardPage";
-import BusinessStoresPage from "./BusinessStoresPage";
+import BusinessLayout from "./BusinessLayout";
+import BusinessDashboardPage    from "./BusinessDashboardPage";
+import BusinessStoresPage       from "./BusinessStoresPage";
+import BusinessCreateStorePage  from "./BusinessCreateStorePage";
+import BusinessSettingsPage     from "./BusinessSettingsPage";
 
+/**
+ * BusinessOwnerApp — rendered when role === "business_owner"
+ *
+ * Deliberately does NOT use AppProvider / useApp() — those are for store_owner
+ * accounts only. All data comes from /api/businesses/* via businessService.ts.
+ */
 export default function BusinessOwnerApp() {
   return (
-    <Layout>
+    <BusinessLayout>
       <Switch>
-        <Route path="/business" component={BusinessDashboardPage} />
-        <Route path="/business/stores" component={BusinessStoresPage} />
-        <Route>
-          <Redirect to="/business" />
-        </Route>
+        <Route path="/business"             component={BusinessDashboardPage}   />
+        <Route path="/business/stores/new"  component={BusinessCreateStorePage} />
+        <Route path="/business/stores"      component={BusinessStoresPage}      />
+        <Route path="/business/settings"    component={BusinessSettingsPage}    />
+        <Route><Redirect to="/business" /></Route>
       </Switch>
-    </Layout>
+    </BusinessLayout>
   );
 }

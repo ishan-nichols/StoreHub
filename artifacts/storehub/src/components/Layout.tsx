@@ -80,10 +80,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     let target = el.scrollTop;
     let current = el.scrollTop;
     let programmatic = false;
+    const rootStyles = getComputedStyle(document.documentElement);
+    const lerpRaw = Number.parseFloat(rootStyles.getPropertyValue("--scroll-lerp"));
+    const baseLerp = Number.isFinite(lerpRaw) ? lerpRaw : 0.14;
 
     const animate = () => {
-      const lerp = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--scroll-lerp"));
-      const baseLerp = Number.isFinite(lerp) ? lerp : 0.14;
       const distance = Math.abs(target - current);
       const adaptiveLerp = Math.min(0.28, baseLerp + Math.min(0.09, distance / 2400));
       current += (target - current) * adaptiveLerp;
@@ -104,7 +105,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
     const onWheel = (event: WheelEvent) => {
       if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-      event.preventDefault();
+
+      // Only prevent default for mouse wheel; allow natural trackpad momentum
+      const isMouseWheel = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL && Math.abs(event.deltaY) > 100;
+      if (isMouseWheel || uiPreferences.motionLevel === "reduced") {
+        event.preventDefault();
+      }
+
       const maxScroll = el.scrollHeight - el.clientHeight;
       const modeScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? el.clientHeight : 1;
       const weightedDelta = event.deltaY * modeScale * 0.9;
@@ -143,11 +150,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex h-full flex-col">
         <div className="px-5 pb-5 pt-6">
-          <div className="glass-panel motion-card rounded-[28px] p-4">
+          <button
+            onClick={() => { setLocation("/dashboard"); setMobileOpen(false); }}
+            className="glass-panel motion-card rounded-[28px] p-4 w-full text-left hover:brightness-[1.02] transition-all active:scale-[0.99]"
+          >
             <div className="flex items-start gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-orange-400 to-amber-600 text-white shadow-lg shadow-amber-200/80">
-                <Store size={20} />
-              </div>
+              {profile?.logoDataUrl ? (
+                <img
+                  src={profile.logoDataUrl}
+                  alt={storeName}
+                  className="h-12 w-12 rounded-2xl object-contain bg-white shadow-sm border border-stone-100 shrink-0"
+                />
+              ) : (
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-orange-400 to-amber-600 text-white shadow-lg shadow-amber-200/80">
+                  <Store size={20} />
+                </div>
+              )}
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-700/70">StoreHub</p>
                 <h1 className="truncate text-base font-semibold text-stone-900">{storeName}</h1>
@@ -167,7 +185,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
             </div>
-          </div>
+          </button>
         </div>
 
         <div className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
@@ -262,6 +280,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               >
                 <Menu size={18} />
               </button>
+              {/* Logo in mobile header */}
+              {profile?.logoDataUrl && (
+                <button onClick={() => setLocation("/dashboard")} className="md:hidden shrink-0">
+                  <img src={profile.logoDataUrl} alt={storeName} className="h-9 w-9 rounded-xl object-contain bg-white border border-stone-100 shadow-sm" />
+                </button>
+              )}
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-400">Workspace</div>
                 <div className="text-lg font-semibold text-stone-900">{activeItem?.label ?? "StoreHub"}</div>
