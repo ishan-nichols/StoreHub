@@ -1,22 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Edit2, Package, Plus, ScanLine, Search, Tag, Trash2, Truck, X } from "lucide-react";
 import { useApp } from "../contexts/useApp";
-import {
-  getProducts,
-  getSuppliers,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-} from "../services/dataService";
-import type { Product, Supplier, InsertProduct } from "../schemas";
-import { formatCurrency } from "../utils";
-import { Plus, Search, Edit2, Trash2, AlertTriangle, X, Package, ScanLine, Tag } from "lucide-react";
-import CurrencyInput from "../components/CurrencyInput";
 import BarcodeScanner from "../components/BarcodeScanner";
-import ReceiveDeliveryModal from "../components/ReceiveDeliveryModal";
-import PricePanel from "../components/PricePanel";
 import BulkPriceUpdateModal from "../components/BulkPriceUpdateModal";
+import CurrencyInput from "../components/CurrencyInput";
+import PricePanel from "../components/PricePanel";
+import ReceiveDeliveryModal from "../components/ReceiveDeliveryModal";
 import ScheduledPriceChangesPanel from "../components/ScheduledPriceChangesPanel";
 import { saveToLibrary, type BarcodeProductInfo } from "../services/barcodeService";
+import { createProduct, deleteProduct, getProducts, getSuppliers, updateProduct } from "../services/dataService";
+import type { InsertProduct, Product, Supplier } from "../schemas";
+import { formatCurrency } from "../utils";
 
 const emptyForm: InsertProduct = {
   name: "",
@@ -44,7 +38,6 @@ export default function InventoryPage() {
   const [form, setForm] = useState<InsertProduct>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [showReceiveDelivery, setShowReceiveDelivery] = useState(false);
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
@@ -52,17 +45,36 @@ export default function InventoryPage() {
   const [selectMode, setSelectMode] = useState(false);
 
   async function load() {
-    const [prods, sups] = await Promise.all([getProducts(), getSuppliers()]);
-    setProducts(prods);
-    setSuppliers(sups);
+    const [productList, supplierList] = await Promise.all([getProducts(), getSuppliers()]);
+    setProducts(productList);
+    setSuppliers(supplierList);
     setLoading(false);
   }
 
   useEffect(() => {
-    load();
+    void load();
     window.addEventListener("storehub:products-updated", load);
     return () => window.removeEventListener("storehub:products-updated", load);
   }, []);
+
+  const filtered = useMemo(
+    () =>
+      products.filter((product) => {
+        const q = search.toLowerCase();
+        return (
+          product.name.toLowerCase().includes(q) ||
+          product.category.toLowerCase().includes(q) ||
+          product.sku.toLowerCase().includes(q)
+        );
+      }),
+    [products, search],
+  );
+
+  const inventoryValue = products.reduce((sum, product) => sum + product.price * product.quantity, 0);
+  const lowStockCount = products.filter((product) => product.quantity <= product.lowStockThreshold).length;
+  const outOfStockCount = products.filter((product) => product.quantity === 0).length;
+  const isGrocery =
+    profile?.businessType === "grocery" || profile?.businessType === "butcher" || profile?.businessType === "bakery";
 
   function openAdd() {
     setForm(emptyForm);
@@ -70,23 +82,23 @@ export default function InventoryPage() {
     setShowForm(true);
   }
 
-  function openEdit(p: Product) {
+  function openEdit(product: Product) {
     setForm({
-      name: p.name,
-      sku: p.sku,
-      category: p.category,
-      price: p.price,
-      quantity: p.quantity,
-      lowStockThreshold: p.lowStockThreshold,
-      supplierId: p.supplierId,
-      unit: p.unit,
-      tags: p.tags,
-      barcode: p.barcode ?? "",
-      costPrice: p.costPrice ?? 0,
-      srp: p.srp,
-      marginAlertPct: p.marginAlertPct ?? 15,
+      name: product.name,
+      sku: product.sku,
+      category: product.category,
+      price: product.price,
+      quantity: product.quantity,
+      lowStockThreshold: product.lowStockThreshold,
+      supplierId: product.supplierId,
+      unit: product.unit,
+      tags: product.tags,
+      barcode: product.barcode ?? "",
+      costPrice: product.costPrice ?? 0,
+      srp: product.srp,
+      marginAlertPct: product.marginAlertPct ?? 15,
     });
-    setEditingId(p.id);
+    setEditingId(product.id);
     setShowForm(true);
   }
 
@@ -107,166 +119,158 @@ export default function InventoryPage() {
   }
 
   function toggleSelect(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
 
   async function handleSave() {
     if (!form.name.trim()) return;
-    if (editingId) {
-      await updateProduct(editingId, form);
-    } else {
-      await createProduct(form);
-    }
+    if (editingId) await updateProduct(editingId, form);
+    else await createProduct(form);
     setShowForm(false);
-    load();
+    await load();
   }
 
   async function handleDelete(id: string) {
     await deleteProduct(id);
     setDeleteConfirm(null);
-    load();
+    await load();
   }
 
-  const filtered = products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.category.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const isGrocery =
-    profile?.businessType === "grocery" ||
-    profile?.businessType === "butcher" ||
-    profile?.businessType === "bakery";
-
-  function getStatusBadge(p: Product) {
-    if (p.quantity === 0)
-      return <span className="text-xs font-bold text-white bg-red-500 px-2 py-0.5 rounded-full">Out of Stock</span>;
-    if (p.quantity <= p.lowStockThreshold)
-      return (
-        <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-          <AlertTriangle size={10} /> Low
-        </span>
-      );
-    return <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">In Stock</span>;
+  function statusBadge(product: Product) {
+    if (product.quantity === 0) return <Status tone="rose" text="Out of stock" />;
+    if (product.quantity <= product.lowStockThreshold) return <Status tone="amber" text="Low stock" />;
+    return <Status tone="emerald" text="Healthy" />;
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">{t.inventory.title}</h1>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setShowBarcodeScanner(true)}
-            className="flex items-center gap-2 border-2 border-emerald-400 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-xl px-3 py-2.5 text-sm font-semibold"
-          >
-            <ScanLine size={15} /> Scan Barcode
-          </button>
-          <button
-            onClick={() => setShowReceiveDelivery(true)}
-            className="flex items-center gap-2 border-2 border-amber-400 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-xl px-3 py-2.5 text-sm font-semibold"
-          >
-            <Package size={15} /> Receive Delivery
-          </button>
-          <button
-            onClick={() => { setSelectMode((v) => !v); setSelectedIds(new Set()); }}
-            className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold border-2 ${selectMode ? "bg-slate-700 text-white border-slate-700" : "border-slate-300 text-slate-700 dark:text-slate-300"}`}
-          >
-            <Tag size={15} /> {selectMode ? "Done selecting" : "Bulk price"}
-          </button>
-          <button
-            onClick={openAdd}
-            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl px-4 py-2.5 text-sm font-semibold shadow"
-          >
-            <Plus size={16} /> {t.inventory.addProduct}
-          </button>
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <section className="glass-panel rounded-[36px] p-6 md:p-8">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-400">Inventory</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-stone-950">Everything on the shelf, in one glance.</h1>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-stone-600">
+              Add items fast, catch low stock early, and keep pricing changes under control without losing your place.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <ActionButton icon={<ScanLine size={16} />} label="Scan barcode" onClick={() => setShowBarcodeScanner(true)} />
+            <ActionButton icon={<Truck size={16} />} label="Receive delivery" onClick={() => setShowReceiveDelivery(true)} />
+            <ActionButton
+              icon={<Tag size={16} />}
+              label={selectMode ? "Done selecting" : "Bulk price"}
+              onClick={() => {
+                setSelectMode((value) => !value);
+                setSelectedIds(new Set());
+              }}
+            />
+            <button
+              onClick={openAdd}
+              className="inline-flex items-center gap-2 rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
+            >
+              <Plus size={16} />
+              {t.inventory.addProduct}
+            </button>
+          </div>
         </div>
-      </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-4">
+          <SummaryCard label="Products" value={String(products.length)} tone="stone" />
+          <SummaryCard label="Inventory value" value={formatCurrency(inventoryValue, currencySymbol)} tone="emerald" />
+          <SummaryCard label="Low stock" value={String(lowStockCount)} tone="amber" />
+          <SummaryCard label="Out of stock" value={String(outOfStockCount)} tone="rose" />
+        </div>
+      </section>
 
       {selectMode && selectedIds.size > 0 && (
-        <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800/30 rounded-xl px-4 py-3 text-sm flex items-center justify-between">
-          <span>{selectedIds.size} product{selectedIds.size !== 1 ? "s" : ""} selected</span>
-          <button onClick={() => setShowBulkUpdate(true)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg font-semibold">
-            Update prices
-          </button>
-        </div>
+        <section className="rounded-[28px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{selectedIds.size} product{selectedIds.size === 1 ? "" : "s"} selected for a bulk price update.</span>
+            <button
+              onClick={() => setShowBulkUpdate(true)}
+              className="inline-flex items-center justify-center rounded-2xl bg-emerald-600 px-4 py-2.5 font-semibold text-white transition hover:bg-emerald-700"
+            >
+              Update prices
+            </button>
+          </div>
+        </section>
       )}
 
-      {/* Search */}
-      <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t.common.search + " products..."}
-          className="w-full pl-9 pr-4 py-3 border border-gray-200 dark:border-gray-600 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-400"
-        />
-      </div>
-
-      {/* Table / List */}
-      {loading ? (
-        <div className="text-center text-gray-400 py-12 text-sm">Loading...</div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-gray-400 text-sm">
-          {products.length === 0 ? t.inventory.noProducts : "No products match your search"}
+      <section className="soft-panel rounded-[32px] p-5">
+        <div className="relative">
+          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={`${t.common.search} products, categories, or SKU`}
+            className="w-full rounded-2xl border border-stone-200 bg-white py-3.5 pl-11 pr-4 text-sm text-stone-900 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+          />
         </div>
-      ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+      </section>
+
+      <section className="soft-panel overflow-hidden rounded-[32px]">
+        {loading ? (
+          <div className="px-6 py-16 text-center text-sm text-stone-400">Loading inventory…</div>
+        ) : filtered.length === 0 ? (
+          <div className="px-6 py-16 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[22px] bg-stone-100 text-stone-500">
+              <Package size={22} />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-stone-900">
+              {products.length === 0 ? "No inventory yet" : "No products match that search"}
+            </h2>
+            <p className="mt-2 text-sm text-stone-500">
+              {products.length === 0 ? "Start with your first product or scan a barcode to move faster." : "Try a simpler keyword or clear the search field."}
+            </p>
+          </div>
+        ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 dark:border-gray-700">
-                  {selectMode && <th className="px-2 py-3 w-8"></th>}
-                  <th className="text-left px-4 py-3 font-semibold text-gray-500 dark:text-gray-400">Product</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 hidden sm:table-cell">Category</th>
-                  <th className="text-right px-4 py-3 font-semibold text-gray-500 dark:text-gray-400">Price</th>
-                  <th className="text-right px-4 py-3 font-semibold text-gray-500 dark:text-gray-400">Qty</th>
-                  <th className="text-center px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 hidden md:table-cell">Status</th>
-                  <th className="px-4 py-3" />
+            <table className="min-w-full text-sm">
+              <thead className="bg-[#faf7f1] text-stone-500">
+                <tr>
+                  {selectMode && <th className="px-4 py-4 text-left font-medium">Select</th>}
+                  <th className="px-6 py-4 text-left font-medium">Product</th>
+                  <th className="px-4 py-4 text-left font-medium">Category</th>
+                  <th className="px-4 py-4 text-right font-medium">Price</th>
+                  <th className="px-4 py-4 text-right font-medium">Quantity</th>
+                  <th className="px-4 py-4 text-left font-medium">Status</th>
+                  <th className="px-6 py-4 text-right font-medium">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-                {filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+              <tbody className="divide-y divide-stone-100">
+                {filtered.map((product) => (
+                  <tr key={product.id} className="bg-white transition hover:bg-[#fcfbf8]">
                     {selectMode && (
-                      <td className="px-2 py-3 text-center">
-                        <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} className="accent-emerald-600" />
+                      <td className="px-4 py-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(product.id)}
+                          onChange={() => toggleSelect(product.id)}
+                          className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                        />
                       </td>
                     )}
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-gray-800 dark:text-gray-100">{p.name}</div>
-                      {p.sku && <div className="text-xs text-gray-400">{p.sku}</div>}
-                      <div className="md:hidden mt-1">{getStatusBadge(p)}</div>
+                    <td className="px-6 py-4">
+                      <div className="font-medium text-stone-900">{product.name}</div>
+                      <div className="mt-1 text-xs text-stone-400">{product.sku || "No SKU"}</div>
                     </td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden sm:table-cell">{p.category || "—"}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-700 dark:text-gray-200">
-                      {formatCurrency(p.price, currencySymbol)}
+                    <td className="px-4 py-4 text-stone-500">{product.category || "—"}</td>
+                    <td className="px-4 py-4 text-right font-semibold text-stone-900">{formatCurrency(product.price, currencySymbol)}</td>
+                    <td className="px-4 py-4 text-right">
+                      <span className={`font-semibold ${product.quantity <= product.lowStockThreshold ? "text-rose-600" : "text-stone-900"}`}>{product.quantity}</span>
+                      <span className="ml-1 text-xs text-stone-400">{product.unit}</span>
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={`font-bold ${p.quantity <= p.lowStockThreshold ? "text-red-600" : "text-gray-700 dark:text-gray-200"}`}>
-                        {p.quantity}
-                      </span>
-                      <span className="text-gray-400 text-xs ml-1">{p.unit}</span>
-                    </td>
-                    <td className="px-4 py-3 text-center hidden md:table-cell">{getStatusBadge(p)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => openEdit(p)}
-                          className="p-2 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                        >
-                          <Edit2 size={15} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirm(p.id)}
-                          className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                    <td className="px-4 py-4">{statusBadge(product)}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex justify-end gap-2">
+                        <IconButton icon={<Edit2 size={15} />} label="Edit product" onClick={() => openEdit(product)} />
+                        <IconButton icon={<Trash2 size={15} />} label="Delete product" onClick={() => setDeleteConfirm(product.id)} danger />
                       </div>
                     </td>
                   </tr>
@@ -274,169 +278,143 @@ export default function InventoryPage() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </section>
 
-      {/* Scheduled price changes */}
       <ScheduledPriceChangesPanel products={products} />
 
-      {/* Modals */}
-      {showBarcodeScanner && (
-        <BarcodeScanner onClose={() => setShowBarcodeScanner(false)} onResult={handleBarcodeResult} />
-      )}
-      {showReceiveDelivery && (
-        <ReceiveDeliveryModal onClose={() => setShowReceiveDelivery(false)} onComplete={load} />
-      )}
+      {showBarcodeScanner && <BarcodeScanner onClose={() => setShowBarcodeScanner(false)} onResult={handleBarcodeResult} />}
+      {showReceiveDelivery && <ReceiveDeliveryModal onClose={() => setShowReceiveDelivery(false)} onComplete={load} />}
       {showBulkUpdate && (
         <BulkPriceUpdateModal
-          selectedProducts={products.filter((p) => selectedIds.has(p.id))}
+          selectedProducts={products.filter((product) => selectedIds.has(product.id))}
           onClose={() => setShowBulkUpdate(false)}
-          onApplied={() => { setSelectedIds(new Set()); setSelectMode(false); load(); }}
+          onApplied={() => {
+            setSelectedIds(new Set());
+            setSelectMode(false);
+            void load();
+          }}
         />
       )}
 
-      {/* Add/Edit Modal */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
-              <h2 className="font-bold text-gray-800 dark:text-gray-100">
-                {editingId ? t.inventory.editProduct : t.inventory.addProduct}
-              </h2>
-              <button onClick={() => setShowForm(false)} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl overflow-hidden rounded-[32px] bg-[#fbfaf7] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-stone-200 px-6 py-5">
+              <div>
+                <h2 className="text-xl font-semibold text-stone-950">{editingId ? t.inventory.editProduct : t.inventory.addProduct}</h2>
+                <p className="text-sm text-stone-500">Keep pricing, stock, and supplier details easy to maintain.</p>
+              </div>
+              <button onClick={() => setShowForm(false)} className="rounded-2xl bg-white p-2 text-stone-400 transition hover:text-stone-700">
                 <X size={18} />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              {editingId && (
-                <PricePanel
-                  product={products.find((p) => p.id === editingId)!}
-                  onChange={load}
-                />
-              )}
-              <Field label={t.inventory.productName + " *"}>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className={inputCls}
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
+
+            <div className="max-h-[80vh] overflow-y-auto px-6 py-6">
+              {editingId && <PricePanel product={products.find((product) => product.id === editingId)!} onChange={load} />}
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Field label={`${t.inventory.productName} *`}>
+                  <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} className={inputCls} />
+                </Field>
+                <Field label={t.inventory.category}>
+                  <input value={form.category} onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value }))} className={inputCls} />
+                </Field>
                 <Field label="SKU">
-                  <input
-                    value={form.sku}
-                    onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
-                    className={inputCls}
-                  />
+                  <input value={form.sku} onChange={(event) => setForm((prev) => ({ ...prev, sku: event.target.value }))} className={inputCls} />
                 </Field>
                 <Field label="Barcode (UPC/EAN)">
                   <input
                     value={form.barcode ?? ""}
-                    onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
+                    onChange={(event) => setForm((prev) => ({ ...prev, barcode: event.target.value }))}
                     className={inputCls}
                     placeholder="0123456789012"
                   />
                 </Field>
-              </div>
-              <Field label={t.inventory.category}>
-                <input
-                  value={form.category}
-                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-                  className={inputCls}
-                />
-              </Field>
-              <div className="grid grid-cols-3 gap-3">
                 <Field label={`Cost (${currencySymbol})`}>
-                  <CurrencyInput
-                    value={form.costPrice ?? 0}
-                    onChange={(v) => setForm((f) => ({ ...f, costPrice: v }))}
-                    className={inputCls}
-                  />
+                  <CurrencyInput value={form.costPrice ?? 0} onChange={(value) => setForm((prev) => ({ ...prev, costPrice: value }))} className={inputCls} />
                 </Field>
                 <Field label={`${t.inventory.price} (${currencySymbol})`}>
-                  <CurrencyInput
-                    value={form.price}
-                    onChange={(v) => setForm((f) => ({ ...f, price: v }))}
-                    className={inputCls}
-                  />
+                  <CurrencyInput value={form.price} onChange={(value) => setForm((prev) => ({ ...prev, price: value }))} className={inputCls} />
                 </Field>
                 <Field label={`SRP (${currencySymbol})`}>
                   <CurrencyInput
                     value={form.srp ?? 0}
-                    onChange={(v) => setForm((f) => ({ ...f, srp: v > 0 ? v : undefined }))}
+                    onChange={(value) => setForm((prev) => ({ ...prev, srp: value > 0 ? value : undefined }))}
                     className={inputCls}
-                    placeholder="optional"
+                    placeholder="Optional"
                   />
                 </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
                 <Field label={t.inventory.quantity}>
                   <input
-                    type="number" min={0}
+                    type="number"
+                    min={0}
                     value={form.quantity}
-                    onChange={(e) => setForm((f) => ({ ...f, quantity: parseInt(e.target.value) || 0 }))}
+                    onChange={(event) => setForm((prev) => ({ ...prev, quantity: parseInt(event.target.value, 10) || 0 }))}
                     className={inputCls}
                   />
                 </Field>
-                <Field label="Margin alert below %">
-                  <input
-                    type="number" min={0} step={0.5}
-                    value={form.marginAlertPct ?? 15}
-                    onChange={(e) => setForm((f) => ({ ...f, marginAlertPct: parseFloat(e.target.value) || 0 }))}
-                    className={inputCls}
-                  />
-                </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
                 <Field label={t.inventory.lowStockThreshold}>
                   <input
                     type="number"
                     min={0}
                     value={form.lowStockThreshold}
-                    onChange={(e) => setForm((f) => ({ ...f, lowStockThreshold: parseInt(e.target.value) || 0 }))}
+                    onChange={(event) => setForm((prev) => ({ ...prev, lowStockThreshold: parseInt(event.target.value, 10) || 0 }))}
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="Margin alert below %">
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={form.marginAlertPct ?? 15}
+                    onChange={(event) => setForm((prev) => ({ ...prev, marginAlertPct: parseFloat(event.target.value) || 0 }))}
                     className={inputCls}
                   />
                 </Field>
                 <Field label={t.inventory.unit}>
                   <input
                     value={form.unit}
-                    onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
+                    onChange={(event) => setForm((prev) => ({ ...prev, unit: event.target.value }))}
                     className={inputCls}
-                    placeholder="unit, kg, pcs..."
+                    placeholder="unit, kg, box…"
                   />
                 </Field>
+                {suppliers.length > 0 && (
+                  <Field label={t.inventory.supplier}>
+                    <select
+                      value={form.supplierId ?? ""}
+                      onChange={(event) => setForm((prev) => ({ ...prev, supplierId: event.target.value || null }))}
+                      className={inputCls}
+                    >
+                      <option value="">No supplier</option>
+                      {suppliers.map((supplier) => (
+                        <option key={supplier.id} value={supplier.id}>
+                          {supplier.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
               </div>
-              {suppliers.length > 0 && (
-                <Field label={t.inventory.supplier}>
-                  <select
-                    value={form.supplierId ?? ""}
-                    onChange={(e) => setForm((f) => ({ ...f, supplierId: e.target.value || null }))}
-                    className={inputCls}
-                  >
-                    <option value="">No supplier</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </Field>
-              )}
+
               {isGrocery && (
-                <div className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2">
-                  Tip: Set a low stock threshold for perishables to get timely restocking alerts.
+                <div className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                  <span>Perishable inventory benefits from a tighter low-stock threshold so staff can react before a shelf goes empty.</span>
                 </div>
               )}
             </div>
-            <div className="px-6 pb-6 flex gap-3">
-              <button
-                onClick={() => setShowForm(false)}
-                className="flex-1 border border-gray-300 rounded-xl py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
-              >
+
+            <div className="flex gap-3 border-t border-stone-200 px-6 py-5">
+              <button onClick={() => setShowForm(false)} className="flex-1 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
                 {t.common.cancel}
               </button>
               <button
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 disabled={!form.name.trim()}
-                className="flex-[2] bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-xl py-3 text-sm transition-colors"
+                className="flex-[1.4] rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-50"
               >
                 {t.common.save}
               </button>
@@ -445,23 +423,16 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Delete Confirm */}
       {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-sm w-full space-y-4">
-            <h3 className="font-bold text-gray-800 dark:text-gray-100">{t.inventory.deleteConfirm}</h3>
-            <p className="text-sm text-gray-500">This cannot be undone.</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="flex-1 border border-gray-300 rounded-xl py-2.5 text-sm font-semibold text-gray-600"
-              >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-[28px] bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-stone-950">{t.inventory.deleteConfirm}</h3>
+            <p className="mt-2 text-sm text-stone-500">This cannot be undone.</p>
+            <div className="mt-5 flex gap-3">
+              <button onClick={() => setDeleteConfirm(null)} className="flex-1 rounded-2xl border border-stone-200 px-4 py-3 text-sm font-medium text-stone-600">
                 {t.common.cancel}
               </button>
-              <button
-                onClick={() => handleDelete(deleteConfirm)}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl py-2.5 text-sm transition-colors"
-              >
+              <button onClick={() => void handleDelete(deleteConfirm)} className="flex-1 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white">
                 {t.common.delete}
               </button>
             </div>
@@ -472,13 +443,61 @@ export default function InventoryPage() {
   );
 }
 
+function SummaryCard({ label, value, tone }: { label: string; value: string; tone: "stone" | "emerald" | "amber" | "rose" }) {
+  const toneMap: Record<string, string> = {
+    stone: "bg-stone-100 text-stone-700",
+    emerald: "bg-emerald-50 text-emerald-700",
+    amber: "bg-amber-50 text-amber-700",
+    rose: "bg-rose-50 text-rose-700",
+  };
+  return (
+    <div className="rounded-[24px] bg-white/72 p-4">
+      <div className="text-sm text-stone-500">{label}</div>
+      <div className="mt-3 flex items-center justify-between">
+        <div className="text-2xl font-semibold tracking-[-0.04em] text-stone-950">{value}</div>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${toneMap[tone]}`}>{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function ActionButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="inline-flex items-center gap-2 rounded-2xl border border-stone-200 bg-white/80 px-4 py-3 text-sm font-medium text-stone-600 transition hover:bg-white">
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function IconButton({ icon, label, onClick, danger = false }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      className={`rounded-2xl p-2.5 transition ${danger ? "text-stone-400 hover:bg-rose-50 hover:text-rose-600" : "text-stone-400 hover:bg-amber-50 hover:text-amber-700"}`}
+    >
+      {icon}
+    </button>
+  );
+}
+
+function Status({ text, tone }: { text: string; tone: "emerald" | "amber" | "rose" }) {
+  const toneMap: Record<string, string> = {
+    emerald: "bg-emerald-50 text-emerald-700",
+    amber: "bg-amber-50 text-amber-700",
+    rose: "bg-rose-50 text-rose-700",
+  };
+  return <span className={`rounded-full px-3 py-1 text-xs font-semibold ${toneMap[tone]}`}>{text}</span>;
+}
+
 const inputCls =
-  "w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100";
+  "w-full rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">{label}</label>
+      <label className="mb-2 block text-sm font-medium text-stone-600">{label}</label>
       {children}
     </div>
   );

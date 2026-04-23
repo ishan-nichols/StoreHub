@@ -1,17 +1,31 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useApp } from "../contexts/useApp";
 import {
-  LayoutDashboard, Package, ShoppingCart, Receipt, TrendingDown,
-  Truck, Users, Settings, Menu, X, Store, ExternalLink,
-  BarChart2, Zap, Plug,
+  ArrowUpRight,
+  BarChart2,
+  LayoutDashboard,
+  Menu,
+  Package,
+  Plug,
+  Receipt,
+  Settings,
+  ShoppingCart,
+  Sparkles,
+  Store,
+  Truck,
+  Users,
+  Wallet,
+  X,
+  Zap,
 } from "lucide-react";
 
 interface NavItem {
   key: string;
   label: string;
-  icon: React.ReactNode;
+  note: string;
   path: string;
+  icon: React.ReactNode;
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -19,58 +33,43 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const isSolo    = profile?.storeSize === "solo" || (profile?.numEmployees === 0 && profile?.onboardingVersion === 2);
+  const isSolo = profile?.storeSize === "solo" || (profile?.numEmployees === 0 && profile?.onboardingVersion === 2);
   const painPoints = profile?.painPoints ?? [];
-  const goal       = profile?.goal ?? "";
+  const goal = profile?.goal ?? "";
 
-  // Build base nav item pool
   const baseItems: NavItem[] = [
-    { key: "dashboard",    label: t.nav.dashboard,  icon: <LayoutDashboard size={20} />, path: "/dashboard"    },
-    { key: "pos",          label: t.nav.pos,         icon: <ShoppingCart size={20} />,   path: "/pos"          },
-    { key: "inventory",    label: t.nav.inventory,   icon: <Package size={20} />,         path: "/inventory"    },
-    { key: "sales",        label: t.nav.sales,       icon: <Receipt size={20} />,         path: "/sales"        },
-    { key: "expenses",     label: t.nav.expenses,    icon: <TrendingDown size={20} />,    path: "/expenses"     },
-    { key: "reports",      label: "Reports",          icon: <BarChart2 size={20} />,       path: "/reports"      },
-    { key: "automations",  label: "Automations",      icon: <Zap size={20} />,             path: "/automations"  },
-    { key: "integrations", label: "Integrations",     icon: <Plug size={20} />,            path: "/integrations" },
-    { key: "suppliers",    label: t.nav.suppliers,   icon: <Truck size={20} />,            path: "/suppliers"    },
-    ...(!isSolo
-      ? [{ key: "employees", label: t.nav.employees, icon: <Users size={20} />, path: "/employees" }]
-      : []),
-    { key: "settings",     label: t.nav.settings,    icon: <Settings size={20} />,        path: "/settings"     },
+    { key: "dashboard", label: t.nav.dashboard, note: "Daily pulse", path: "/dashboard", icon: <LayoutDashboard size={18} /> },
+    { key: "pos", label: t.nav.pos, note: "Fast checkout", path: "/pos", icon: <ShoppingCart size={18} /> },
+    { key: "inventory", label: t.nav.inventory, note: "Products and stock", path: "/inventory", icon: <Package size={18} /> },
+    { key: "sales", label: t.nav.sales, note: "Orders and receipts", path: "/sales", icon: <Receipt size={18} /> },
+    { key: "expenses", label: t.nav.expenses, note: "Money going out", path: "/expenses", icon: <Wallet size={18} /> },
+    { key: "reports", label: "Reports", note: "What is changing", path: "/reports", icon: <BarChart2 size={18} /> },
+    { key: "automations", label: "Automations", note: "Work on autopilot", path: "/automations", icon: <Zap size={18} /> },
+    { key: "integrations", label: "Integrations", note: "Connect tools", path: "/integrations", icon: <Plug size={18} /> },
+    { key: "suppliers", label: t.nav.suppliers, note: "Vendors and deliveries", path: "/suppliers", icon: <Truck size={18} /> },
+    ...(!isSolo ? [{ key: "employees", label: t.nav.employees, note: "Team access", path: "/employees", icon: <Users size={18} /> }] : []),
+    { key: "settings", label: t.nav.settings, note: "Store preferences", path: "/settings", icon: <Settings size={18} /> },
   ];
 
-  // Reorder based on pain points and goal
-  function buildNavItems(): NavItem[] {
-    const items = [...baseItems];
+  const navItems = useMemo(() => {
     const priorityKeys: string[] = [];
-
-    // goal-based priority
     if (goal === "profit" || goal === "numbers" || painPoints.includes("profits") || painPoints.includes("numbers")) {
       priorityKeys.push("reports");
     }
-    if (painPoints.includes("employees") && !isSolo) {
-      priorityKeys.push("employees");
-    }
-    if (painPoints.includes("suppliers")) {
-      priorityKeys.push("suppliers");
-    }
-    if (painPoints.includes("reorder")) {
-      priorityKeys.push("inventory");
-    }
+    if (painPoints.includes("employees") && !isSolo) priorityKeys.push("employees");
+    if (painPoints.includes("suppliers")) priorityKeys.push("suppliers");
+    if (painPoints.includes("reorder")) priorityKeys.push("inventory");
+    if (priorityKeys.length === 0) return baseItems;
 
-    if (priorityKeys.length === 0) return items;
+    const pinned = priorityKeys.map((key) => baseItems.find((item) => item.key === key)).filter(Boolean) as NavItem[];
+    const rest = baseItems.filter((item) => !priorityKeys.includes(item.key));
+    const dashboard = rest.shift();
+    return dashboard ? [dashboard, ...pinned, ...rest] : [...pinned, ...rest];
+  }, [baseItems, goal, isSolo, painPoints]);
 
-    // Move prioritized items up — right after "dashboard"
-    const dashIdx   = items.findIndex(i => i.key === "dashboard");
-    const others    = items.filter(i => !priorityKeys.includes(i.key));
-    const priority  = priorityKeys.map(k => items.find(i => i.key === k)!).filter(Boolean);
-    const before    = others.slice(0, dashIdx + 1);
-    const after     = others.slice(dashIdx + 1);
-    return [...before, ...priority, ...after];
-  }
-
-  const navItems = buildNavItems();
+  const activeItem = navItems.find((item) => location.startsWith(item.path)) ?? navItems[0];
+  const storeName = profile?.storeName || "StoreHub";
+  const ownerFirstName = profile?.ownerName?.split(" ")[0] || "there";
 
   function navigate(item: NavItem) {
     trackFeature(item.key);
@@ -82,102 +81,143 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return location === path || (path !== "/" && location.startsWith(path));
   }
 
-  const storeName = profile?.storeName ?? "StoreHub";
+  function SidebarContent() {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="px-5 pb-5 pt-6">
+          <div className="glass-panel rounded-[28px] p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-orange-400 to-amber-600 text-white shadow-lg shadow-amber-200/80">
+                <Store size={20} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-amber-700/70">StoreHub</p>
+                <h1 className="truncate text-base font-semibold text-stone-900">{storeName}</h1>
+                <p className="mt-1 text-xs text-stone-500">Built for calm, quick store management.</p>
+              </div>
+            </div>
 
-  const SidebarContent = () => (
-    <nav className="flex flex-col h-full">
-      {/* Logo */}
-      <div className="px-6 py-5 border-b border-amber-100 dark:border-gray-700">
-        <div className="flex items-center gap-2">
-          <Store size={22} className="text-amber-500" />
-          <div>
-            <div className="font-bold text-amber-600 text-base leading-tight">{storeName}</div>
-            <div className="text-xs text-gray-400">StoreHub</div>
+            <div className="mt-4 rounded-2xl bg-stone-950 px-4 py-3 text-white">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-white/50">Today</p>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Focus</p>
+                  <p className="text-xs text-white/60">{activeItem?.note ?? "Store overview"}</p>
+                </div>
+                <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/80">
+                  {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+          {navItems.map((item) => {
+            const active = isActive(item.path);
+            return (
+              <button
+                key={item.key}
+                onClick={() => navigate(item)}
+                className={`group flex w-full items-center gap-3 rounded-[22px] px-4 py-3 text-left transition-all ${
+                  active
+                    ? "bg-stone-950 text-white shadow-lg shadow-stone-900/10"
+                    : "text-stone-600 hover:bg-white/70 hover:text-stone-900"
+                }`}
+              >
+                <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${active ? "bg-white/10" : "bg-white text-amber-700 shadow-sm"}`}>
+                  {item.icon}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold">{item.label}</div>
+                  <div className={`text-xs ${active ? "text-white/60" : "text-stone-400 group-hover:text-stone-500"}`}>{item.note}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="px-4 pb-5">
+          {!isSolo && (
+            <a
+              href="/employee"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="soft-panel mb-3 flex items-center gap-3 rounded-[24px] px-4 py-3 text-sm text-stone-700 transition-transform hover:-translate-y-0.5"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+                <Users size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">Employee portal</div>
+                <div className="text-xs text-stone-500">Clock-ins, quick access, shared with your team.</div>
+              </div>
+              <ArrowUpRight size={16} className="text-stone-400" />
+            </a>
+          )}
+
+          <div className="rounded-[24px] border border-white/70 bg-white/72 px-4 py-3 shadow-sm backdrop-blur-md">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-stone-900 to-stone-700 text-sm font-semibold text-white">
+                {ownerFirstName.slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-stone-900">{profile?.ownerName ?? "Store owner"}</div>
+                <div className="truncate text-xs text-stone-500">{profile?.businessType ?? "Retail"} workspace</div>
+              </div>
+              <Sparkles size={16} className="ml-auto text-amber-500" />
+            </div>
           </div>
         </div>
       </div>
-
-      {/* Nav Links */}
-      <div className="flex-1 py-4 space-y-1 px-3 overflow-y-auto">
-        {navItems.map((item) => (
-          <button
-            key={item.key}
-            onClick={() => navigate(item)}
-            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all ${
-              isActive(item.path)
-                ? "bg-amber-500 text-white shadow-md shadow-amber-200 dark:shadow-amber-900/30"
-                : "text-gray-600 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-gray-700 hover:text-amber-700"
-            }`}
-          >
-            {item.icon}
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Employee Portal link — only shown when not solo */}
-      {!isSolo && (
-        <div className="px-3 pb-2 border-t border-amber-100 dark:border-gray-700 pt-3">
-          <a
-            href="/employee"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
-          >
-            <Users size={14} />
-            Employee Sign-In Portal
-            <ExternalLink size={11} className="ml-auto opacity-60" />
-          </a>
-        </div>
-      )}
-
-      {/* Owner info */}
-      <div className="px-4 py-3 border-t border-amber-100 dark:border-gray-700">
-        <div className="text-xs text-gray-400">
-          {profile?.ownerName && (
-            <span className="font-medium text-gray-600 dark:text-gray-300">{profile.ownerName}</span>
-          )}
-        </div>
-      </div>
-    </nav>
-  );
+    );
+  }
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex flex-col w-56 bg-white dark:bg-gray-800 border-r border-gray-100 dark:border-gray-700 shadow-sm shrink-0">
+    <div className="app-shell-bg flex min-h-screen">
+      <aside className="hidden w-[320px] shrink-0 border-r border-white/40 bg-white/35 md:block">
         <SidebarContent />
       </aside>
 
-      {/* Mobile Nav Overlay */}
       {mobileOpen && (
-        <div className="md:hidden fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
-          <aside className="relative w-64 bg-white dark:bg-gray-800 h-full shadow-xl">
-            <button onClick={() => setMobileOpen(false)} className="absolute top-4 right-4 p-1 rounded-lg text-gray-400 hover:bg-gray-100">
-              <X size={20} />
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-stone-900/35 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-[88%] max-w-[320px] bg-[#f4efe6] shadow-2xl">
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-2xl bg-white/75 text-stone-500"
+            >
+              <X size={18} />
             </button>
             <SidebarContent />
           </aside>
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Mobile Header */}
-        <header className="md:hidden flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 shadow-sm">
-          <button onClick={() => setMobileOpen(true)} className="p-2 rounded-xl text-gray-500 hover:bg-amber-50 hover:text-amber-600 transition-colors">
-            <Menu size={22} />
-          </button>
-          <div className="flex items-center gap-2">
-            <Store size={18} className="text-amber-500" />
-            <span className="font-bold text-amber-600 text-sm">{storeName}</span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 border-b border-white/40 bg-white/45 backdrop-blur-xl">
+          <div className="flex items-center justify-between gap-4 px-4 py-4 md:px-8">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setMobileOpen(true)}
+                className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/70 bg-white/80 text-stone-600 shadow-sm md:hidden"
+              >
+                <Menu size={18} />
+              </button>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-400">Workspace</div>
+                <div className="text-lg font-semibold text-stone-900">{activeItem?.label ?? "StoreHub"}</div>
+              </div>
+            </div>
+
+            <div className="hidden items-center gap-3 rounded-full border border-white/70 bg-white/72 px-4 py-2 text-sm text-stone-600 shadow-sm sm:flex">
+              <Sparkles size={15} className="text-amber-500" />
+              <span>{storeName}</span>
+            </div>
           </div>
-          <div className="w-10" />
         </header>
 
-        {/* Page Content */}
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6">{children}</main>
       </div>
     </div>
   );

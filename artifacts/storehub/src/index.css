@@ -190,9 +190,51 @@
   * {
     @apply border-border;
   }
+  html {
+    color-scheme: light;
+  }
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    background:
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.95), transparent 28%),
+      radial-gradient(circle at top right, rgba(251, 191, 36, 0.18), transparent 24%),
+      linear-gradient(180deg, #fffef9 0%, #f6f1e7 100%);
+    min-height: 100vh;
   }
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(217, 119, 6, 0.18);
+}
+
+.app-shell-bg {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.92), transparent 28%),
+    linear-gradient(180deg, rgba(255, 251, 235, 0.88) 0%, rgba(245, 239, 229, 0.96) 54%, rgba(241, 235, 225, 1) 100%);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(22px);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow: 0 24px 60px rgba(148, 113, 52, 0.14);
+}
+
+.soft-panel {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(221, 214, 201, 0.9);
+  box-shadow: 0 18px 40px rgba(120, 98, 64, 0.08);
+}
+
+.premium-grid {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px);
+  background-size: 44px 44px;
 }
 
 /* Hide scrollbars for category pills */

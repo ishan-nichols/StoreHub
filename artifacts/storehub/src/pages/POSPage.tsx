@@ -1,18 +1,20 @@
-import { useEffect, useState } from "react";
-import { useApp } from "../contexts/useApp";
-import { getProducts, createSale } from "../services/dataService";
-import type { Product, CartItem } from "../schemas";
-import { formatCurrency } from "../utils";
-import { Plus, Minus, Trash2, ShoppingCart, X, Printer, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Minus, Plus, Printer, Search, ShoppingCart, Trash2, X } from "lucide-react";
 import CurrencyInput from "../components/CurrencyInput";
+import { useApp } from "../contexts/useApp";
+import { createSale, getProducts } from "../services/dataService";
+import type { CartItem, Product } from "../schemas";
+import { formatCurrency } from "../utils";
 
 export default function POSPage() {
-  const { t, currencySymbol } = useApp();
+  const { t, currencySymbol, profile } = useApp();
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState("");
   const [showCheckout, setShowCheckout] = useState(false);
   const [amountPaid, setAmountPaid] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState("All");
   const [receipt, setReceipt] = useState<{
     receiptNumber: string;
     items: CartItem[];
@@ -22,78 +24,74 @@ export default function POSPage() {
     storeName: string;
     date: string;
   } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState("All");
 
   async function load() {
-    const prods = await getProducts();
-    setProducts(prods);
+    const productList = await getProducts();
+    setProducts(productList);
     setLoading(false);
   }
 
   useEffect(() => {
-    load();
+    void load();
     window.addEventListener("storehub:products-updated", load);
     return () => window.removeEventListener("storehub:products-updated", load);
   }, []);
 
-  const categories = ["All", ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))];
-  const { profile } = useApp();
+  const categories = useMemo(() => ["All", ...Array.from(new Set(products.map((product) => product.category).filter(Boolean)))], [products]);
+  const filtered = useMemo(
+    () =>
+      products.filter((product) => {
+        const matchSearch =
+          product.name.toLowerCase().includes(search.toLowerCase()) ||
+          product.category.toLowerCase().includes(search.toLowerCase());
+        const matchCategory = activeCategory === "All" || product.category === activeCategory;
+        return matchSearch && matchCategory && product.quantity > 0;
+      }),
+    [activeCategory, products, search],
+  );
 
-  const filtered = products.filter((p) => {
-    const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.category.toLowerCase().includes(search.toLowerCase());
-    const matchCat = activeCategory === "All" || p.category === activeCategory;
-    return matchSearch && matchCat && p.quantity > 0;
-  });
+  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const taxRate = profile?.taxRate ?? 0;
+  const tax = parseFloat(((subtotal * taxRate) / 100).toFixed(2));
+  const total = subtotal + tax;
+  const change = amountPaid - total;
 
-  function addToCart(p: Product) {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.productId === p.id);
+  function addToCart(product: Product) {
+    setCart((previous) => {
+      const existing = previous.find((item) => item.productId === product.id);
       if (existing) {
-        if (existing.quantity >= p.quantity) return prev;
-        return prev.map((i) => i.productId === p.id ? { ...i, quantity: i.quantity + 1 } : i);
+        if (existing.quantity >= product.quantity) return previous;
+        return previous.map((item) => (item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item));
       }
-      return [...prev, { productId: p.id, productName: p.name, price: p.price, quantity: 1, unit: p.unit }];
+      return [...previous, { productId: product.id, productName: product.name, price: product.price, quantity: 1, unit: product.unit }];
     });
   }
 
   function updateQty(productId: string, qty: number) {
-    if (qty <= 0) {
-      setCart((prev) => prev.filter((i) => i.productId !== productId));
-    } else {
-      setCart((prev) => prev.map((i) => i.productId === productId ? { ...i, quantity: qty } : i));
-    }
+    if (qty <= 0) setCart((previous) => previous.filter((item) => item.productId !== productId));
+    else setCart((previous) => previous.map((item) => (item.productId === productId ? { ...item, quantity: qty } : item)));
   }
 
-  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const taxRate = profile?.taxRate ?? 0;
-  const tax = parseFloat((subtotal * taxRate / 100).toFixed(2));
-  const total = subtotal + tax;
-  const change = amountPaid - total;
-
   async function handleCompleteSale() {
-    if (cart.length === 0) return;
-    const paid = amountPaid;
-    if (paid < total) return;
+    if (cart.length === 0 || amountPaid < total) return;
 
     const sale = await createSale({
       items: cart,
       subtotal,
       tax,
       total,
-      amountPaid: paid,
-      change: paid - total,
+      amountPaid,
+      change: amountPaid - total,
       note: "",
+      receiptNumber: "",
     });
 
     setReceipt({
       receiptNumber: sale.receiptNumber,
       items: cart,
       total,
-      change: paid - total,
-      amountPaid: paid,
+      change: amountPaid - total,
+      amountPaid,
       storeName: profile?.storeName ?? "StoreHub",
       date: new Date(sale.createdAt).toLocaleString(),
     });
@@ -104,250 +102,254 @@ export default function POSPage() {
   }
 
   function handlePrint() {
-    /**
-     * [Printer API integration point]
-     * Future: connect to Star Micronics, Epson, or any ESC/POS printer API here.
-     * The receipt data structure is ready for integration.
-     */
     window.print();
   }
 
   return (
-    <div className="flex h-full flex-col md:flex-row overflow-hidden">
-      {/* Products Panel */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden border-r border-gray-100 dark:border-gray-700">
-        <div className="p-4 space-y-3 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800">
-          <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">{t.pos.title}</h1>
-          <div className="relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t.pos.searchProducts}
-              className="w-full pl-9 pr-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-400"
-            />
+    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <section className="glass-panel rounded-[36px] p-6 md:p-8">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-400">Point of sale</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-stone-950">Checkout that stays fast when the line gets long.</h1>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-stone-600">
+              Search instantly, tap products once, and keep the running total visible at every step.
+            </p>
           </div>
-          {categories.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                    activeCategory === cat
-                      ? "bg-amber-500 text-white"
-                      : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-amber-100"
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <HeroStat label="Items in cart" value={String(cart.reduce((sum, item) => sum + item.quantity, 0))} />
+            <HeroStat label="Subtotal" value={formatCurrency(subtotal, currencySymbol)} />
+            <HeroStat label="Total due" value={formatCurrency(total, currencySymbol)} emphasize />
+          </div>
         </div>
+      </section>
 
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <div className="text-center text-gray-400 py-12 text-sm">Loading products...</div>
-          ) : filtered.length === 0 ? (
-            <div className="text-center py-12 text-gray-400 text-sm">
-              {products.length === 0 ? "No products in inventory yet" : "No products found"}
+      <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <section className="soft-panel rounded-[32px] p-5">
+          <div className="flex flex-col gap-4 border-b border-stone-200 pb-5">
+            <div className="relative">
+              <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t.pos.searchProducts}
+                className="w-full rounded-2xl border border-stone-200 bg-white py-3.5 pl-11 pr-4 text-sm text-stone-900 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+              />
             </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {filtered.map((p) => {
-                const inCart = cart.find((i) => i.productId === p.id);
-                return (
+            {categories.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                {categories.map((category) => (
                   <button
-                    key={p.id}
-                    onClick={() => addToCart(p)}
-                    className={`text-left rounded-xl border-2 p-3 transition-all active:scale-95 ${
-                      inCart
-                        ? "border-amber-400 bg-amber-50 dark:bg-amber-900/20"
-                        : "border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-amber-300"
+                    key={category}
+                    onClick={() => setActiveCategory(category)}
+                    className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
+                      activeCategory === category ? "bg-stone-950 text-white" : "bg-white text-stone-500 hover:bg-stone-100"
                     }`}
                   >
-                    <div className="font-semibold text-gray-800 dark:text-gray-100 text-sm leading-tight mb-1">
-                      {p.name}
-                    </div>
-                    <div className="text-amber-600 font-bold text-base">{formatCurrency(p.price, currencySymbol)}</div>
-                    <div className="text-xs text-gray-400 mt-0.5">{p.quantity} {p.unit} left</div>
-                    {inCart && (
-                      <div className="mt-1 text-xs font-bold text-amber-600">{inCart.quantity} in cart</div>
-                    )}
+                    {category}
                   </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Cart Panel */}
-      <div className="w-full md:w-72 lg:w-80 flex flex-col bg-white dark:bg-gray-800 max-h-64 md:max-h-none border-t md:border-t-0 border-gray-200 dark:border-gray-700">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-700">
-          <ShoppingCart size={18} className="text-amber-500" />
-          <span className="font-bold text-gray-800 dark:text-gray-100">{t.pos.cart}</span>
-          {cart.length > 0 && (
-            <span className="ml-auto bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              {cart.reduce((s, i) => s + i.quantity, 0)}
-            </span>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {cart.length === 0 ? (
-            <p className="text-center text-gray-400 text-sm py-6">{t.pos.emptyCart}</p>
-          ) : (
-            cart.map((item) => (
-              <div key={item.productId} className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 rounded-xl p-2">
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">{item.productName}</div>
-                  <div className="text-xs text-amber-600 font-bold">{formatCurrency(item.price * item.quantity, currencySymbol)}</div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => updateQty(item.productId, item.quantity - 1)} className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-200 hover:bg-amber-100 transition-colors">
-                    <Minus size={10} />
-                  </button>
-                  <span className="text-xs font-bold w-5 text-center text-gray-800 dark:text-gray-100">{item.quantity}</span>
-                  <button onClick={() => updateQty(item.productId, item.quantity + 1)} className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-200 hover:bg-amber-100 transition-colors">
-                    <Plus size={10} />
-                  </button>
-                  <button onClick={() => updateQty(item.productId, 0)} className="w-6 h-6 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 transition-colors">
-                    <Trash2 size={10} />
-                  </button>
-                </div>
+                ))}
               </div>
-            ))
-          )}
-        </div>
+            )}
+          </div>
 
-        {cart.length > 0 && (
-          <div className="p-4 border-t border-gray-100 dark:border-gray-700 space-y-3">
-            <div className="flex justify-between text-sm font-bold text-gray-800 dark:text-gray-100">
-              <span>{t.common.total}</span>
-              <span className="text-amber-600">{formatCurrency(total, currencySymbol)}</span>
+          <div className="mt-5">
+            {loading ? (
+              <div className="py-16 text-center text-sm text-stone-400">Loading products…</div>
+            ) : filtered.length === 0 ? (
+              <div className="py-16 text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[22px] bg-stone-100 text-stone-500">
+                  <Search size={20} />
+                </div>
+                <h2 className="mt-4 text-lg font-semibold text-stone-900">{products.length === 0 ? "No products yet" : "No matching products"}</h2>
+                <p className="mt-2 text-sm text-stone-500">
+                  {products.length === 0 ? "Add items in Inventory before using checkout." : "Try another search or category."}
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {filtered.map((product) => {
+                  const inCart = cart.find((item) => item.productId === product.id);
+                  return (
+                    <button
+                      key={product.id}
+                      onClick={() => addToCart(product)}
+                      className={`rounded-[24px] border p-4 text-left transition ${
+                        inCart ? "border-amber-300 bg-amber-50" : "border-stone-200 bg-white hover:border-stone-300 hover:bg-[#fcfbf8]"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="line-clamp-2 text-sm font-semibold text-stone-900">{product.name}</div>
+                          <div className="mt-1 text-xs text-stone-400">{product.category || "General"}</div>
+                        </div>
+                        {inCart && <span className="rounded-full bg-stone-950 px-2.5 py-1 text-xs font-semibold text-white">{inCart.quantity}</span>}
+                      </div>
+                      <div className="mt-5 flex items-end justify-between gap-3">
+                        <div>
+                          <div className="text-lg font-semibold tracking-[-0.03em] text-stone-950">{formatCurrency(product.price, currencySymbol)}</div>
+                          <div className="text-xs text-stone-500">{product.quantity} {product.unit} available</div>
+                        </div>
+                        <span className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-500">Tap to add</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <aside className="soft-panel flex h-fit flex-col rounded-[32px] p-5">
+          <div className="flex items-center gap-3 border-b border-stone-200 pb-4">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+              <ShoppingCart size={20} />
             </div>
+            <div>
+              <h2 className="text-lg font-semibold text-stone-950">{t.pos.cart}</h2>
+              <p className="text-sm text-stone-500">{cart.length === 0 ? "No items selected yet." : `${cart.length} unique item${cart.length === 1 ? "" : "s"} ready to check out.`}</p>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {cart.length === 0 ? (
+              <div className="rounded-[24px] bg-[#fbfaf7] px-4 py-8 text-center text-sm text-stone-500">Choose products from the left to start a sale.</div>
+            ) : (
+              cart.map((item) => (
+                <div key={item.productId} className="rounded-[24px] bg-[#fbfaf7] px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-stone-900">{item.productName}</div>
+                      <div className="mt-1 text-xs text-stone-500">{formatCurrency(item.price, currencySymbol)} each</div>
+                    </div>
+                    <button onClick={() => updateQty(item.productId, 0)} className="rounded-2xl p-2 text-stone-400 transition hover:bg-rose-50 hover:text-rose-600">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <QtyButton onClick={() => updateQty(item.productId, item.quantity - 1)} icon={<Minus size={14} />} />
+                      <span className="min-w-[2rem] text-center text-sm font-semibold text-stone-900">{item.quantity}</span>
+                      <QtyButton onClick={() => updateQty(item.productId, item.quantity + 1)} icon={<Plus size={14} />} />
+                    </div>
+                    <div className="text-sm font-semibold text-stone-950">{formatCurrency(item.price * item.quantity, currencySymbol)}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="mt-5 space-y-3 border-t border-stone-200 pt-5">
+            <LineItem label="Subtotal" value={formatCurrency(subtotal, currencySymbol)} />
+            <LineItem label={`Tax${taxRate ? ` (${taxRate}%)` : ""}`} value={formatCurrency(tax, currencySymbol)} />
+            <LineItem label="Total" value={formatCurrency(total, currencySymbol)} strong />
             <button
               onClick={() => setShowCheckout(true)}
-              className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl py-3.5 text-sm transition-colors shadow-md shadow-amber-200 dark:shadow-amber-900/20"
+              disabled={cart.length === 0}
+              className="w-full rounded-2xl bg-stone-950 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-50"
             >
               {t.pos.completeSale}
             </button>
           </div>
-        )}
+        </aside>
       </div>
 
-      {/* Checkout Modal */}
       {showCheckout && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
-              <h2 className="font-bold text-gray-800 dark:text-gray-100">Complete Sale</h2>
-              <button onClick={() => setShowCheckout(false)} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[32px] bg-[#fbfaf7] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-stone-200 px-6 py-5">
+              <div>
+                <h2 className="text-xl font-semibold text-stone-950">Complete sale</h2>
+                <p className="text-sm text-stone-500">Review totals and enter payment.</p>
+              </div>
+              <button onClick={() => setShowCheckout(false)} className="rounded-2xl bg-white p-2 text-stone-400 transition hover:text-stone-700">
                 <X size={18} />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 space-y-2 text-sm">
-                {cart.map((i) => (
-                  <div key={i.productId} className="flex justify-between text-gray-600 dark:text-gray-300">
-                    <span>{i.productName} × {i.quantity}</span>
-                    <span>{formatCurrency(i.price * i.quantity, currencySymbol)}</span>
-                  </div>
-                ))}
-                <div className="border-t border-gray-200 dark:border-gray-600 pt-2 space-y-1">
-                  <div className="flex justify-between text-gray-500">
-                    <span>Subtotal</span>
-                    <span>{formatCurrency(subtotal, currencySymbol)}</span>
-                  </div>
-                  {tax > 0 && (
-                    <div className="flex justify-between text-gray-500">
-                      <span>Tax ({taxRate}%)</span>
-                      <span>{formatCurrency(tax, currencySymbol)}</span>
+
+            <div className="space-y-5 px-6 py-6">
+              <div className="rounded-[24px] bg-white p-4">
+                <div className="space-y-2">
+                  {cart.map((item) => (
+                    <div key={item.productId} className="flex justify-between gap-3 text-sm text-stone-600">
+                      <span>{item.productName} × {item.quantity}</span>
+                      <span>{formatCurrency(item.price * item.quantity, currencySymbol)}</span>
                     </div>
-                  )}
-                  <div className="flex justify-between font-bold text-gray-800 dark:text-gray-100 pt-1 border-t border-gray-200 dark:border-gray-600">
-                    <span>Total</span>
-                    <span>{formatCurrency(total, currencySymbol)}</span>
-                  </div>
+                  ))}
+                </div>
+                <div className="mt-4 border-t border-stone-200 pt-4">
+                  <LineItem label="Subtotal" value={formatCurrency(subtotal, currencySymbol)} />
+                  <LineItem label={`Tax${taxRate ? ` (${taxRate}%)` : ""}`} value={formatCurrency(tax, currencySymbol)} />
+                  <LineItem label="Total" value={formatCurrency(total, currencySymbol)} strong />
                 </div>
               </div>
+
               <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1">{t.pos.amountPaid} ({currencySymbol})</label>
+                <label className="mb-2 block text-sm font-medium text-stone-600">
+                  {t.pos.amountPaid} ({currencySymbol})
+                </label>
                 <CurrencyInput
                   value={amountPaid}
                   onChange={setAmountPaid}
                   placeholder={total.toFixed(2)}
-                  className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-4 py-3 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
                   autoFocus
+                  className="w-full rounded-2xl border border-stone-200 bg-white px-4 py-3.5 text-lg font-semibold text-stone-900 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
                 />
               </div>
+
               {amountPaid >= total && amountPaid > 0 && (
-                <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-3 text-center">
-                  <div className="text-xs text-emerald-600 font-semibold">{t.pos.change}</div>
-                  <div className="text-2xl font-bold text-emerald-700">{formatCurrency(change, currencySymbol)}</div>
+                <div className="rounded-[24px] bg-emerald-50 px-4 py-4 text-center">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">{t.pos.change}</div>
+                  <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-emerald-700">{formatCurrency(change, currencySymbol)}</div>
                 </div>
               )}
+
               <button
-                onClick={handleCompleteSale}
+                onClick={() => void handleCompleteSale()}
                 disabled={amountPaid < total || cart.length === 0}
-                className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-xl py-3.5 text-base transition-colors"
+                className="w-full rounded-2xl bg-stone-950 px-4 py-3.5 text-base font-semibold text-white transition hover:bg-stone-800 disabled:opacity-50"
               >
-                Confirm Sale
+                Confirm sale
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Receipt Modal */}
       {receipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[32px] bg-white shadow-2xl">
+            <div className="px-6 py-6">
               <div className="text-center">
-                <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-2">
-                  <span className="text-2xl">✓</span>
-                </div>
-                <h2 className="font-bold text-gray-800 dark:text-gray-100">{t.pos.receiptTitle}</h2>
-                <div className="text-xs text-gray-400 mt-1">#{receipt.receiptNumber}</div>
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-600">✓</div>
+                <h2 className="mt-4 text-xl font-semibold text-stone-950">{t.pos.receiptTitle}</h2>
+                <div className="mt-1 text-xs text-stone-400">#{receipt.receiptNumber}</div>
               </div>
-              <div className="border border-dashed border-gray-200 dark:border-gray-600 rounded-xl p-4 space-y-2 text-sm font-mono">
-                <div className="text-center font-bold text-gray-800 dark:text-gray-100 text-base">{receipt.storeName}</div>
-                <div className="text-center text-gray-400 text-xs">{receipt.date}</div>
-                <div className="border-t border-dashed border-gray-200 dark:border-gray-600 my-2" />
-                {receipt.items.map((i, idx) => (
-                  <div key={idx} className="flex justify-between text-gray-700 dark:text-gray-300">
-                    <span>{i.productName} × {i.quantity}</span>
-                    <span>{formatCurrency(i.price * i.quantity, currencySymbol)}</span>
-                  </div>
-                ))}
-                <div className="border-t border-dashed border-gray-200 dark:border-gray-600 my-2" />
-                <div className="flex justify-between font-bold text-gray-800 dark:text-gray-100">
-                  <span>TOTAL</span>
-                  <span>{formatCurrency(receipt.total, currencySymbol)}</span>
+
+              <div className="mt-5 rounded-[24px] border border-dashed border-stone-200 px-4 py-4 font-mono text-sm">
+                <div className="text-center font-semibold text-stone-950">{receipt.storeName}</div>
+                <div className="mt-1 text-center text-xs text-stone-400">{receipt.date}</div>
+                <div className="my-4 border-t border-dashed border-stone-200" />
+                <div className="space-y-2">
+                  {receipt.items.map((item, index) => (
+                    <div key={`${item.productId}-${index}`} className="flex justify-between gap-3 text-stone-700">
+                      <span>{item.productName} × {item.quantity}</span>
+                      <span>{formatCurrency(item.price * item.quantity, currencySymbol)}</span>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex justify-between text-gray-500">
-                  <span>Paid</span>
-                  <span>{formatCurrency(receipt.amountPaid, currencySymbol)}</span>
-                </div>
-                <div className="flex justify-between text-gray-500">
-                  <span>Change</span>
-                  <span>{formatCurrency(receipt.change, currencySymbol)}</span>
-                </div>
+                <div className="my-4 border-t border-dashed border-stone-200" />
+                <LineItem label="TOTAL" value={formatCurrency(receipt.total, currencySymbol)} strong />
+                <LineItem label="Paid" value={formatCurrency(receipt.amountPaid, currencySymbol)} />
+                <LineItem label="Change" value={formatCurrency(receipt.change, currencySymbol)} />
               </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={handlePrint}
-                  className="flex-1 flex items-center justify-center gap-2 border border-gray-300 text-gray-600 rounded-xl py-2.5 text-sm font-semibold hover:bg-gray-50 transition-colors"
-                >
-                  <Printer size={15} /> {t.pos.printReceipt}
+
+              <div className="mt-5 flex gap-3">
+                <button onClick={handlePrint} className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-stone-200 px-4 py-3 text-sm font-medium text-stone-600 transition hover:bg-stone-50">
+                  <Printer size={15} />
+                  {t.pos.printReceipt}
                 </button>
-                <button
-                  onClick={() => setReceipt(null)}
-                  className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl py-2.5 text-sm transition-colors"
-                >
+                <button onClick={() => setReceipt(null)} className="flex-1 rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800">
                   {t.pos.newSale}
                 </button>
               </div>
@@ -355,6 +357,32 @@ export default function POSPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function HeroStat({ label, value, emphasize = false }: { label: string; value: string; emphasize?: boolean }) {
+  return (
+    <div className={`rounded-[24px] px-4 py-4 ${emphasize ? "bg-stone-950 text-white" : "bg-white/72 text-stone-900"}`}>
+      <div className={`text-xs font-semibold uppercase tracking-[0.18em] ${emphasize ? "text-white/50" : "text-stone-400"}`}>{label}</div>
+      <div className="mt-3 text-2xl font-semibold tracking-[-0.04em]">{value}</div>
+    </div>
+  );
+}
+
+function QtyButton({ onClick, icon }: { onClick: () => void; icon: React.ReactNode }) {
+  return (
+    <button onClick={onClick} className="flex h-8 w-8 items-center justify-center rounded-2xl bg-white text-stone-600 transition hover:bg-stone-100">
+      {icon}
+    </button>
+  );
+}
+
+function LineItem({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between gap-3 py-1 text-sm ${strong ? "font-semibold text-stone-950" : "text-stone-600"}`}>
+      <span>{label}</span>
+      <span>{value}</span>
     </div>
   );
 }
