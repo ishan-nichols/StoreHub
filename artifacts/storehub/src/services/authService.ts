@@ -196,6 +196,17 @@ export async function socialLogin(
   return json;
 }
 
+// Sends Google OAuth access token to backend for secure server-side verification.
+export async function googleSignIn(accessToken: string): Promise<{ user: AuthUser; isNewUser: boolean }> {
+  const res = await authFetch("/social/google", {
+    method: "POST",
+    body: JSON.stringify({ accessToken }),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? "Google sign-in failed");
+  return json;
+}
+
 // ─── Login Methods ────────────────────────────────────────────────────────────
 
 export async function getLoginMethods(): Promise<LoginMethod> {

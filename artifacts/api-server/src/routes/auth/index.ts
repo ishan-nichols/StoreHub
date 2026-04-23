@@ -416,19 +416,39 @@ router.post("/social/:provider", async (req, res) => {
   const allowed = ["google", "apple", "microsoft"];
   if (!allowed.includes(provider)) return res.status(400).json({ error: "Unknown provider" });
 
-  const { email, fullName, providerUserId } = req.body as {
-    email: string; fullName?: string; providerUserId: string;
-  };
+  let email: string | undefined;
+  let fullName: string | undefined;
+  let providerUserId: string | undefined;
 
-  // INTEGRATION: OAUTH_GOOGLE
-  // The frontend should exchange the Google OAuth code for tokens via the real Google OAuth flow.
-  // Here we trust the verified providerUserId from the frontend after verifying the id_token:
-  //   const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID });
-  //   const payload = ticket.getPayload();
-  //   providerUserId = payload.sub; email = payload.email; fullName = payload.name;
-
-  // INTEGRATION: OAUTH_APPLE — similar pattern using apple-signin-auth package
-  // INTEGRATION: OAUTH_MICROSOFT — similar pattern using @azure/msal-node
+  if (provider === "google") {
+    // Frontend sends an access token obtained via @react-oauth/google.
+    // We verify it by calling Google's userinfo endpoint — no extra package needed.
+    const { accessToken } = req.body as { accessToken?: string };
+    if (!accessToken) {
+      return res.status(400).json({ error: "Google access token is required" });
+    }
+    const googleRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!googleRes.ok) {
+      return res.status(401).json({ error: "Invalid Google session. Please sign in again." });
+    }
+    const googleUser = await googleRes.json() as {
+      sub: string; email: string; name: string; email_verified: boolean;
+    };
+    if (!googleUser.email_verified) {
+      return res.status(401).json({ error: "Your Google account email is not verified." });
+    }
+    email        = googleUser.email;
+    providerUserId = googleUser.sub;
+    fullName     = googleUser.name;
+  } else {
+    // INTEGRATION: OAUTH_APPLE — verify using apple-signin-auth package
+    // INTEGRATION: OAUTH_MICROSOFT — verify using @azure/msal-node
+    ({ email, fullName, providerUserId } = req.body as {
+      email: string; fullName?: string; providerUserId: string;
+    });
+  }
 
   if (!email || !providerUserId) {
     return res.status(400).json({ error: "Email and provider user ID required" });

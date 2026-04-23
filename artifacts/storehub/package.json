@@ -78,6 +78,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@react-oauth/google": "^0.13.5",
     "html5-qrcode": "^2.3.8"
   }
 }
