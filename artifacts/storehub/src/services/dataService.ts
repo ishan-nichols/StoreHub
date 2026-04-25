@@ -275,6 +275,22 @@ export function getSeedProducts(businessType: BusinessType, currencyMultiplier =
       { name: "Phone Charger Cable", sku: "CHG001", category: "Electronics", price: 9.99 * currencyMultiplier, quantity: 15, lowStockThreshold: 4, supplierId: null, unit: "each", tags: ["electronics", "phone"] },
       { name: "Laundry Detergent", sku: "LND001", category: "Cleaning", price: 11.99 * currencyMultiplier, quantity: 18, lowStockThreshold: 5, supplierId: null, unit: "bottle", tags: ["cleaning", "laundry"] },
     ],
+    cstore: [
+      { name: "Marlboro Red (pk)", sku: "CIG001", category: "Tobacco", price: 9.99 * currencyMultiplier, quantity: 60, lowStockThreshold: 15, supplierId: null, unit: "pack", tags: ["tobacco"] },
+      { name: "Bud Light (6pk)", sku: "BUD001", category: "Beer", price: 8.99 * currencyMultiplier, quantity: 40, lowStockThreshold: 10, supplierId: null, unit: "6pk", tags: ["beer"] },
+      { name: "Lay's Classic Chips", sku: "LAY001", category: "Snacks", price: 2.99 * currencyMultiplier, quantity: 50, lowStockThreshold: 12, supplierId: null, unit: "bag", tags: ["snacks"] },
+      { name: "Red Bull (8.4oz)", sku: "RBL001", category: "Energy Drinks", price: 3.49 * currencyMultiplier, quantity: 48, lowStockThreshold: 12, supplierId: null, unit: "can", tags: ["energy drink"] },
+      { name: "Lottery Ticket", sku: "LOT001", category: "Lottery", price: 2.00 * currencyMultiplier, quantity: 100, lowStockThreshold: 20, supplierId: null, unit: "each", tags: ["lottery"] },
+      { name: "Regular Fuel (gal)", sku: "GAS001", category: "Fuel", price: 3.49 * currencyMultiplier, quantity: 500, lowStockThreshold: 100, supplierId: null, unit: "gallon", tags: ["fuel"] },
+    ],
+    liquor: [
+      { name: "Budweiser (6pk)", sku: "BDW001", category: "Beer", price: 9.99 * currencyMultiplier, quantity: 48, lowStockThreshold: 12, supplierId: null, unit: "6pk", tags: ["beer"] },
+      { name: "Jack Daniel's (750ml)", sku: "JDN001", category: "Whiskey", price: 29.99 * currencyMultiplier, quantity: 20, lowStockThreshold: 5, supplierId: null, unit: "bottle", tags: ["whiskey", "spirits"] },
+      { name: "Smirnoff Vodka (750ml)", sku: "SMV001", category: "Vodka", price: 18.99 * currencyMultiplier, quantity: 24, lowStockThreshold: 6, supplierId: null, unit: "bottle", tags: ["vodka", "spirits"] },
+      { name: "Cabernet Sauvignon (750ml)", sku: "CAB001", category: "Wine", price: 14.99 * currencyMultiplier, quantity: 18, lowStockThreshold: 4, supplierId: null, unit: "bottle", tags: ["wine"] },
+      { name: "Corona Extra (12pk)", sku: "COR001", category: "Beer", price: 16.99 * currencyMultiplier, quantity: 30, lowStockThreshold: 8, supplierId: null, unit: "12pk", tags: ["beer", "import"] },
+      { name: "Coke (2L)", sku: "COK001", category: "Mixers", price: 2.99 * currencyMultiplier, quantity: 36, lowStockThreshold: 10, supplierId: null, unit: "bottle", tags: ["mixer", "soda"] },
+    ],
     other: [
       { name: "Product 1", sku: "PRD001", category: "General", price: 9.99 * currencyMultiplier, quantity: 20, lowStockThreshold: 5, supplierId: null, unit: "each", tags: [] },
       { name: "Product 2", sku: "PRD002", category: "General", price: 14.99 * currencyMultiplier, quantity: 15, lowStockThreshold: 4, supplierId: null, unit: "each", tags: [] },

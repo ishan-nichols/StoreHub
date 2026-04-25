@@ -2,7 +2,8 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { businesses, storeProfiles, users } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth } from "../../middlewares/requireAuth.js";
+import { requireAuth, invalidateBusinessIdCache } from "../../middlewares/requireAuth.js";
+import { signAccessToken, signRefreshToken, setAuthCookies } from "../../lib/auth.js";
 
 const router: IRouter = Router();
 
@@ -48,16 +49,34 @@ router.post("/business", requireAuth as any, async (req: Request, res: Response)
 
     const userId = req.userId!;
 
-    // Check if user has already created a business during onboarding (re-take support)
-    const existingUser = await db
-      .select({ businessId: users.businessId })
+    // Fetch current user state (full row so the response matches the upgrade path)
+    const [currentUser] = await db
+      .select()
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
 
+    // If this user is a store_owner who already has a businessId (i.e. they were
+    // created as a sub-account by a business owner and are now going through
+    // onboarding in "switched" mode), just return their existing business without
+    // modifying anything — the business name belongs to the business owner, not
+    // this store manager.
+    if (currentUser?.role === "store_owner" && currentUser?.businessId) {
+      const [existingBusiness] = await db
+        .select()
+        .from(businesses)
+        .where(eq(businesses.id, currentUser.businessId))
+        .limit(1);
+      res.status(200).json({
+        business: existingBusiness,
+        user: currentUser,
+      });
+      return;
+    }
+
     let newBusiness;
 
-    if (existingUser[0]?.businessId) {
+    if (currentUser?.businessId) {
       // Re-take: update the existing business instead of creating a new one
       const [updated] = await db
         .update(businesses)
@@ -67,7 +86,7 @@ router.post("/business", requireAuth as any, async (req: Request, res: Response)
           website: businessWebsite || null,
           updatedAt: new Date(),
         })
-        .where(eq(businesses.id, existingUser[0].businessId))
+        .where(eq(businesses.id, currentUser.businessId))
         .returning();
       newBusiness = updated;
     } else {
@@ -93,6 +112,17 @@ router.post("/business", requireAuth as any, async (req: Request, res: Response)
       })
       .where(eq(users.id, userId))
       .returning();
+
+    // Drop any stale cached businessId for this user so requireAuth and
+    // requireBusinessOwnerOrAdmin pick up the newly-linked business on the
+    // very next request.
+    invalidateBusinessIdCache(userId);
+
+    // Re-issue JWT cookies with the new role so subsequent API calls
+    // (which check the JWT, not the DB) work as business_owner immediately.
+    const newAccessToken  = signAccessToken({ userId: updatedUser.id, email: updatedUser.email!, role: updatedUser.role });
+    const newRefreshToken = signRefreshToken({ userId: updatedUser.id, email: updatedUser.email!, role: updatedUser.role });
+    setAuthCookies(res, newAccessToken, newRefreshToken, true);
 
     res.status(201).json({
       business: newBusiness,
@@ -184,6 +214,16 @@ router.post("/ensure-store-profile", requireAuth as any, async (req: Request, re
       businessId?: string;
     };
 
+    // Always refetch the user from DB so we pick up any businessId that was just
+    // set by POST /api/onboarding/business (the request body may not include it).
+    const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const resolvedBusinessId = businessId ?? u?.businessId ?? null;
+
+    if (!resolvedBusinessId) {
+      res.status(400).json({ error: "No business associated with user — call POST /api/onboarding/business first" });
+      return;
+    }
+
     const [existing] = await db.select().from(storeProfiles).where(eq(storeProfiles.userId, userId));
     if (existing) {
       const [row] = await db
@@ -192,7 +232,8 @@ router.post("/ensure-store-profile", requireAuth as any, async (req: Request, re
           ...(storeName?.trim() ? { storeName: storeName.trim() } : {}),
           ...(ownerName?.trim() ? { ownerName: ownerName.trim() } : {}),
           ...(businessType ? { businessType } : {}),
-          ...(businessId ? { businessId } : {}),
+          // Always backfill businessId if the existing row lacks one — prevents orphaned stores.
+          ...(existing.businessId ? {} : { businessId: resolvedBusinessId }),
           lastUpdated: new Date(),
         })
         .where(eq(storeProfiles.userId, userId))
@@ -201,14 +242,11 @@ router.post("/ensure-store-profile", requireAuth as any, async (req: Request, re
       return;
     }
 
-    const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    const resolvedBusinessId = businessId ?? u?.businessId ?? null;
-
     const [row] = await db
       .insert(storeProfiles)
       .values({
         userId,
-        ...(resolvedBusinessId ? { businessId: resolvedBusinessId } : {}),
+        businessId: resolvedBusinessId,
         storeName: storeName?.trim() || "My store",
         ownerName: ownerName?.trim() || u?.fullName || "Owner",
         businessType: businessType || "other",

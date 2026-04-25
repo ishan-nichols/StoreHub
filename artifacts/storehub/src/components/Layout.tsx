@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useApp } from "../contexts/useApp";
+import { useAuth } from "../contexts/AuthContext";
+import { computeProfileFeatures } from "../lib/profileFeatures";
 import {
+  ArrowLeft,
   ArrowUpRight,
   BarChart2,
+  Building2,
   LayoutDashboard,
   Menu,
   Package,
@@ -18,6 +22,10 @@ import {
   Wallet,
   X,
   Zap,
+  Landmark,
+  TrendingUp,
+  UserCheck,
+  ShieldCheck,
 } from "lucide-react";
 
 interface NavItem {
@@ -30,26 +38,44 @@ interface NavItem {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { profile, t, trackFeature, uiPreferences } = useApp();
+  const { isSwitched, isBusinessOwner, isAdmin, activeStoreId, restoreBusiness } = useAuth();
+  const isStoreView = (isBusinessOwner || isAdmin) && !!activeStoreId;
+  const showStoreViewBanner = isSwitched || isStoreView;
+
+  function handleExitStore() {
+    if (isAdmin) {
+      // Admin: clear activeStoreId and go back to admin panel
+      sessionStorage.removeItem("sh_active_store_id");
+      window.location.href = "/admin";
+    } else {
+      restoreBusiness();
+    }
+  }
   const [location, setLocation] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const mainRef = useRef<HTMLElement | null>(null);
 
-  const isSolo = profile?.storeSize === "solo" || (profile?.numEmployees === 0 && profile?.onboardingVersion === 2);
+  const pf = computeProfileFeatures(profile ?? null);
+  const { isSolo, showEmployees } = pf;
   const painPoints = profile?.painPoints ?? [];
   const goal = profile?.goal ?? "";
 
   const baseItems: NavItem[] = [
-    { key: "dashboard", label: t.nav.dashboard, note: "Daily pulse", path: "/dashboard", icon: <LayoutDashboard size={18} /> },
-    { key: "pos", label: t.nav.pos, note: "Fast checkout", path: "/pos", icon: <ShoppingCart size={18} /> },
-    { key: "inventory", label: t.nav.inventory, note: "Products and stock", path: "/inventory", icon: <Package size={18} /> },
-    { key: "sales", label: t.nav.sales, note: "Orders and receipts", path: "/sales", icon: <Receipt size={18} /> },
-    { key: "expenses", label: t.nav.expenses, note: "Money going out", path: "/expenses", icon: <Wallet size={18} /> },
-    { key: "reports", label: "Reports", note: "What is changing", path: "/reports", icon: <BarChart2 size={18} /> },
-    { key: "automations", label: "Automations", note: "Work on autopilot", path: "/automations", icon: <Zap size={18} /> },
-    { key: "integrations", label: "Integrations", note: "Connect tools", path: "/integrations", icon: <Plug size={18} /> },
-    { key: "suppliers", label: t.nav.suppliers, note: "Vendors and deliveries", path: "/suppliers", icon: <Truck size={18} /> },
-    ...(!isSolo ? [{ key: "employees", label: t.nav.employees, note: "Team access", path: "/employees", icon: <Users size={18} /> }] : []),
-    { key: "settings", label: t.nav.settings, note: "Store preferences", path: "/settings", icon: <Settings size={18} /> },
+    { key: "dashboard",    label: t.nav.dashboard,  note: "Daily pulse",          path: "/dashboard",    icon: <LayoutDashboard size={18} /> },
+    { key: "pos",          label: t.nav.pos,         note: "Fast checkout",        path: "/pos",          icon: <ShoppingCart size={18} /> },
+    { key: "inventory",    label: t.nav.inventory,   note: "Products and stock",   path: "/inventory",    icon: <Package size={18} /> },
+    { key: "sales",        label: t.nav.sales,       note: "Orders and receipts",  path: "/sales",        icon: <Receipt size={18} /> },
+    { key: "expenses",     label: t.nav.expenses,    note: "Money going out",      path: "/expenses",     icon: <Wallet size={18} /> },
+    { key: "reports",      label: "Reports",         note: "What is changing",     path: "/reports",      icon: <BarChart2 size={18} /> },
+    { key: "automations",  label: "Automations",     note: "Work on autopilot",    path: "/automations",  icon: <Zap size={18} /> },
+    { key: "integrations", label: "Integrations",    note: "Connect tools",        path: "/integrations", icon: <Plug size={18} /> },
+    { key: "tax",          label: "Tax Center",      note: "Taxes & compliance",   path: "/tax",          icon: <Landmark size={18} /> },
+    { key: "cashflow",     label: "Cash Flow",       note: "30-day forecast",      path: "/cashflow",     icon: <TrendingUp size={18} /> },
+    { key: "customers",    label: "Customers",       note: "Loyalty & intelligence", path: "/customers",  icon: <UserCheck size={18} /> },
+    { key: "compliance",   label: "Compliance",      note: "Licenses & deadlines", path: "/compliance",   icon: <ShieldCheck size={18} /> },
+    { key: "suppliers",    label: t.nav.suppliers,   note: "Vendors and deliveries", path: "/suppliers",  icon: <Truck size={18} /> },
+    { key: "employees", label: t.nav.employees, note: "Team access", path: "/employees", icon: <Users size={18} /> },
+    { key: "settings",     label: t.nav.settings,    note: "Store preferences",    path: "/settings",     icon: <Settings size={18} /> },
   ];
 
   const navItems = useMemo(() => {
@@ -57,16 +83,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if (goal === "profit" || goal === "numbers" || painPoints.includes("profits") || painPoints.includes("numbers")) {
       priorityKeys.push("reports");
     }
-    if (painPoints.includes("employees") && !isSolo) priorityKeys.push("employees");
+    if ((goal === "team" || painPoints.includes("employees")) && showEmployees) priorityKeys.push("employees");
+    if (goal === "reorder" || painPoints.includes("reorder")) priorityKeys.push("inventory");
     if (painPoints.includes("suppliers")) priorityKeys.push("suppliers");
-    if (painPoints.includes("reorder")) priorityKeys.push("inventory");
     if (priorityKeys.length === 0) return baseItems;
 
     const pinned = priorityKeys.map((key) => baseItems.find((item) => item.key === key)).filter(Boolean) as NavItem[];
     const rest = baseItems.filter((item) => !priorityKeys.includes(item.key));
     const dashboard = rest.shift();
     return dashboard ? [dashboard, ...pinned, ...rest] : [...pinned, ...rest];
-  }, [baseItems, goal, isSolo, painPoints]);
+  }, [baseItems, goal, showEmployees, painPoints]);
 
   const activeItem = navItems.find((item) => location.startsWith(item.path)) ?? navItems[0];
   const storeName = profile?.storeName || "StoreHub";
@@ -74,65 +100,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const el = mainRef.current;
-    if (!el || uiPreferences.motionLevel === "reduced") return;
-
-    let frame = 0;
-    let target = el.scrollTop;
-    let current = el.scrollTop;
-    let programmatic = false;
-    const rootStyles = getComputedStyle(document.documentElement);
-    const lerpRaw = Number.parseFloat(rootStyles.getPropertyValue("--scroll-lerp"));
-    const baseLerp = Number.isFinite(lerpRaw) ? lerpRaw : 0.14;
-
-    const animate = () => {
-      const distance = Math.abs(target - current);
-      const adaptiveLerp = Math.min(0.28, baseLerp + Math.min(0.09, distance / 2400));
-      current += (target - current) * adaptiveLerp;
-      if (Math.abs(target - current) < 0.5) {
-        current = target;
-      }
-
-      programmatic = true;
-      el.scrollTop = current;
-      programmatic = false;
-
-      if (Math.abs(target - current) >= 0.5) {
-        frame = window.requestAnimationFrame(animate);
-      } else {
-        frame = 0;
-      }
-    };
-
-    const onWheel = (event: WheelEvent) => {
-      if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-
-      // Only prevent default for mouse wheel; allow natural trackpad momentum
-      const isMouseWheel = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL && Math.abs(event.deltaY) > 100;
-      if (isMouseWheel || uiPreferences.motionLevel === "reduced") {
-        event.preventDefault();
-      }
-
-      const maxScroll = el.scrollHeight - el.clientHeight;
-      const modeScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? el.clientHeight : 1;
-      const weightedDelta = event.deltaY * modeScale * 0.9;
-      target = Math.max(0, Math.min(maxScroll, target + weightedDelta));
-      if (!frame) {
-        frame = window.requestAnimationFrame(animate);
-      }
-    };
-
-    const onScroll = () => {
-      if (programmatic) return;
-      target = el.scrollTop;
-      current = el.scrollTop;
-    };
-
-    el.addEventListener("wheel", onWheel, { passive: false });
-    el.addEventListener("scroll", onScroll, { passive: true });
+    if (!el) return;
+    // Keep scrolling native. Wheel interception can break mouse wheel behavior
+    // depending on OS/browser device settings.
     return () => {
-      el.removeEventListener("wheel", onWheel);
-      el.removeEventListener("scroll", onScroll);
-      if (frame) window.cancelAnimationFrame(frame);
     };
   }, [uiPreferences.motionLevel]);
 
@@ -298,6 +269,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
+
+        {showStoreViewBanner && (
+          <div className="shrink-0 border-b border-indigo-200 bg-indigo-600 px-4 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm text-white">
+                <Building2 size={15} className="shrink-0" />
+                <span>{isAdmin ? "Admin — viewing store" : "Viewing as store manager"}</span>
+              </div>
+              <button
+                onClick={handleExitStore}
+                className="flex items-center gap-1.5 rounded-xl bg-white/20 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/30 transition-colors"
+              >
+                <ArrowLeft size={13} />
+                {isAdmin ? "Back to Admin" : "Back to Business"}
+              </button>
+            </div>
+          </div>
+        )}
 
         <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-4 py-4 md:px-8 md:py-6">
           <div className="page-reveal">{children}</div>

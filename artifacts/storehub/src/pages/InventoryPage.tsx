@@ -7,6 +7,8 @@ import CurrencyInput from "../components/CurrencyInput";
 import PricePanel from "../components/PricePanel";
 import ReceiveDeliveryModal from "../components/ReceiveDeliveryModal";
 import ScheduledPriceChangesPanel from "../components/ScheduledPriceChangesPanel";
+import PredictedDemandPanel from "../components/PredictedDemandPanel";
+import DeadStockPanel from "../components/DeadStockPanel";
 import { saveToLibrary, type BarcodeProductInfo } from "../services/barcodeService";
 import { createProduct, deleteProduct, getProducts, getSuppliers, updateProduct } from "../services/dataService";
 import type { InsertProduct, Product, Supplier } from "../schemas";
@@ -75,8 +77,11 @@ export default function InventoryPage() {
   return <RetailInventoryPage />;
 }
 
+type RetailTab = "products" | "predictions" | "deadstock";
+
 function RetailInventoryPage() {
   const { t, currencySymbol, profile } = useApp();
+  const [activeTab, setActiveTab] = useState<RetailTab>("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [search, setSearch] = useState("");
@@ -90,6 +95,12 @@ function RetailInventoryPage() {
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
+
+  const retailTabs: { id: RetailTab; label: string }[] = [
+    { id: "products",     label: "Products" },
+    { id: "predictions",  label: "Predictions" },
+    { id: "deadstock",    label: "Dead Stock" },
+  ];
 
   async function load() {
     const [productList, supplierList] = await Promise.all([getProducts(), getSuppliers()]);
@@ -196,6 +207,32 @@ function RetailInventoryPage() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      {/* Tab bar */}
+      <div className="flex gap-2 rounded-[32px] bg-stone-100 p-1.5 self-start">
+        {retailTabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`rounded-[24px] px-5 py-2.5 text-sm font-semibold transition ${
+              activeTab === tab.id
+                ? "bg-white text-stone-950 shadow-sm"
+                : "text-stone-500 hover:text-stone-700"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Predictions tab */}
+      {activeTab === "predictions" && <PredictedDemandPanel />}
+
+      {/* Dead Stock tab */}
+      {activeTab === "deadstock" && <DeadStockPanel />}
+
+      {/* Products tab — existing content below */}
+      {activeTab !== "predictions" && activeTab !== "deadstock" && (
+      <>
       <section className="glass-panel rounded-[36px] p-6 md:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -485,6 +522,8 @@ function RetailInventoryPage() {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

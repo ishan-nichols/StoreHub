@@ -29,12 +29,17 @@ import EmployeePortalPage from "./pages/EmployeePortalPage";
 import ReportsPage      from "./pages/ReportsPage";
 import AutomationsPage  from "./pages/AutomationsPage";
 import IntegrationsPage from "./pages/IntegrationsPage";
+import TaxPage          from "./pages/TaxPage";
+import CashFlowPage     from "./pages/CashFlowPage";
+import CustomersPage    from "./pages/CustomersPage";
+import CompliancePage   from "./pages/CompliancePage";
 
 // Admin screens
 import AdminDashboardPage    from "./pages/admin/AdminDashboardPage";
 import AdminStoresPage       from "./pages/admin/AdminStoresPage";
 import AdminStoreDetailPage  from "./pages/admin/AdminStoreDetailPage";
 import AdminCreateStorePage  from "./pages/admin/AdminCreateStorePage";
+import AdminUsersPage        from "./pages/admin/AdminUsersPage";
 
 // Business owner screens
 import BusinessOwnerApp from "./pages/business/BusinessOwnerApp";
@@ -50,6 +55,7 @@ function AdminApp() {
       <Route path="/admin/stores/new"   component={AdminCreateStorePage} />
       <Route path="/admin/stores/:userId" component={AdminStoreDetailPage} />
       <Route path="/admin/stores"       component={AdminStoresPage} />
+      <Route path="/admin/users"        component={AdminUsersPage} />
       <Route><Redirect to="/admin" /></Route>
     </Switch>
   );
@@ -59,8 +65,13 @@ function AdminApp() {
 
 function StoreRoutes() {
   const { isOnboarded, isLoading } = useApp();
+  const { isBusinessOwner, isAdmin, activeStoreId } = useAuth();
 
-  if (isLoading) {
+  // Business owners and admins in store-view mode bypass the onboarding gate —
+  // they have full access to the store regardless of its onboarding status.
+  const isStoreView = (isBusinessOwner || isAdmin) && !!activeStoreId;
+
+  if (isLoading && !isStoreView) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="text-center space-y-2">
@@ -72,7 +83,7 @@ function StoreRoutes() {
   }
 
   function protectedPage(component: React.ComponentType) {
-    if (!isOnboarded) return <Redirect to="/onboarding" />;
+    if (!isOnboarded && !isStoreView) return <Redirect to="/onboarding" />;
     return (
       <Layout>
         {(() => { const C = component; return <C />; })()}
@@ -90,7 +101,7 @@ function StoreRoutes() {
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/onboarding"      component={OnboardingPage} />
       <Route path="/">
-        {isOnboarded ? <Redirect to="/dashboard" /> : <Redirect to="/login" />}
+        {isOnboarded || isStoreView ? <Redirect to="/dashboard" /> : <Redirect to="/login" />}
       </Route>
       <Route path="/dashboard">   {protectedPage(DashboardPage)}    </Route>
       <Route path="/inventory">   {protectedPage(InventoryPage)}    </Route>
@@ -102,9 +113,13 @@ function StoreRoutes() {
       <Route path="/reports">     {protectedPage(ReportsPage)}      </Route>
       <Route path="/automations"> {protectedPage(AutomationsPage)}  </Route>
       <Route path="/integrations">{protectedPage(IntegrationsPage)} </Route>
+      <Route path="/tax">         {protectedPage(TaxPage)}          </Route>
+      <Route path="/cashflow">    {protectedPage(CashFlowPage)}     </Route>
+      <Route path="/customers">   {protectedPage(CustomersPage)}    </Route>
+      <Route path="/compliance">  {protectedPage(CompliancePage)}   </Route>
       <Route path="/settings">    {protectedPage(SettingsPage)}     </Route>
       <Route>
-        {isOnboarded ? <Redirect to="/dashboard" /> : <Redirect to="/login" />}
+        {isOnboarded || isStoreView ? <Redirect to="/dashboard" /> : <Redirect to="/login" />}
       </Route>
     </Switch>
   );
@@ -123,7 +138,7 @@ function StoreApp() {
 // ─── Root — branches on role ──────────────────────────────────────────────────
 
 function AppInner() {
-  const { user, isLoading, isAdmin, isBusinessOwner } = useAuth();
+  const { user, isLoading, isAdmin, isBusinessOwner, activeStoreId } = useAuth();
 
   if (isLoading) {
     return (
@@ -136,17 +151,39 @@ function AppInner() {
     );
   }
 
-  // Superadmin: completely separate app, no store data loading
+  // Superadmin in store-view mode: full store UI scoped to the selected store.
+  if (isAdmin && activeStoreId) {
+    return (
+      <AppProvider>
+        <CloudSyncBootstrap />
+        <StoreApp />
+      </AppProvider>
+    );
+  }
+
+  // Superadmin (no store selected): completely separate admin app.
   if (isAdmin) {
     return <AdminApp />;
   }
 
-  // Business owner: separate app for managing multiple stores
+  // Business owner in store-view mode: render the full store UI scoped to the
+  // selected store via X-Store-User-Id header. The business owner's JWT is
+  // unchanged — no role switching required.
+  if (isBusinessOwner && activeStoreId) {
+    return (
+      <AppProvider>
+        <CloudSyncBootstrap />
+        <StoreApp />
+      </AppProvider>
+    );
+  }
+
+  // Business owner managing their portfolio of stores
   if (isBusinessOwner) {
     return <BusinessOwnerApp />;
   }
 
-  // Unauthenticated users trying to hit /admin — redirect to login
+  // Unauthenticated
   if (!user) {
     return (
       <Switch>
@@ -161,7 +198,7 @@ function AppInner() {
     );
   }
 
-  // Regular store owners
+  // Store owner with their own account
   return (
     <AppProvider>
       <CloudSyncBootstrap />

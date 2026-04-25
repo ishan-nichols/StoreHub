@@ -8,6 +8,7 @@ import { getStorageMode, setStorageMode, type StorageMode } from "../services/st
 import { pullAll, pushSnapshot } from "../services/cloudSync";
 import { useLocation } from "wouter";
 import { getCurrencySymbol } from "../utils";
+import { US_REGIONS, MX_REGIONS, CA_REGIONS } from "../data/taxData";
 import { ActionPill, PageHero, SectionTitle, SummaryTile, SurfaceCard } from "../components/page-shell";
 import {
   CheckCircle, Printer, MapPin, Plug, Globe, RotateCcw, ChevronRight,
@@ -137,6 +138,8 @@ export default function SettingsPage() {
     applyAccentColor(hex);
   }
   const [numEmployees, setNumEmployees] = useState(profile?.numEmployees ?? 0);
+  const [country, setCountry] = useState<"US" | "CA" | "MX">((profile?.country as "US" | "CA" | "MX") ?? "US");
+  const [stateCode, setStateCode] = useState(profile?.stateCode ?? "");
   const [storeCity, setStoreCity] = useState(profile?.storeCity ?? "");
   const [storeAddress, setStoreAddress] = useState(profile?.storeAddress ?? "");
   const [printerName, setPrinterName] = useState(profile?.printerName ?? "");
@@ -155,6 +158,8 @@ export default function SettingsPage() {
       theme,
       accentColor,
       numEmployees,
+      country,
+      stateCode: stateCode || undefined,
       storeCity: storeCity.trim(),
       storeAddress: storeAddress.trim(),
       printerName: printerName.trim(),
@@ -566,6 +571,43 @@ export default function SettingsPage() {
               onChange={(e) => setNumEmployees(parseInt(e.target.value) || 0)}
               className={inputCls}
             />
+          </Field>
+
+          <Field label="Country">
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { value: "US" as const, flag: "🇺🇸", label: "United States" },
+                { value: "CA" as const, flag: "🇨🇦", label: "Canada" },
+                { value: "MX" as const, flag: "🇲🇽", label: "Mexico" },
+              ]).map(c => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => { setCountry(c.value); setStateCode(""); }}
+                  className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 text-xs font-medium transition-all ${
+                    country === c.value
+                      ? "border-amber-500 bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-200"
+                      : "border-gray-200 hover:border-amber-200 text-gray-700 dark:text-gray-200 dark:border-gray-600"
+                  }`}
+                >
+                  <span className="text-xl">{c.flag}</span>
+                  <span className="text-center leading-tight">{c.label}</span>
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          <Field label={country === "CA" ? "Province / Territory" : country === "MX" ? "Estado" : "State"}>
+            <select
+              value={stateCode}
+              onChange={(e) => setStateCode(e.target.value)}
+              className={inputCls}
+            >
+              <option value="">— Select {country === "CA" ? "province" : country === "MX" ? "estado" : "state"} —</option>
+              {(country === "CA" ? CA_REGIONS : country === "MX" ? MX_REGIONS : US_REGIONS).map(r => (
+                <option key={r.code} value={r.stateCode}>{r.stateName}</option>
+              ))}
+            </select>
           </Field>
         </div>
       </Section>

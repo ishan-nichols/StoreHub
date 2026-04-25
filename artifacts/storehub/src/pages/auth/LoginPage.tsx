@@ -304,6 +304,16 @@ export default function LoginPage() {
               </Link>
             </div>
 
+            <div className="mt-4 border-t border-stone-200 pt-4 text-center">
+              <Link
+                to="/employee"
+                className="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-amber-700 transition-colors"
+              >
+                <span className="text-base">👷</span>
+                Employee? Sign in here
+              </Link>
+            </div>
+
             {isDev && (
               <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
                 Dev mode is on. Sign-up tokens are available in API server logs.

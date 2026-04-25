@@ -35,9 +35,14 @@ export const SYNCED_KEYS: Record<string, KeyMap> = {
 };
 
 async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const storeId = sessionStorage.getItem("sh_active_store_id");
   return fetch(`${BASE}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(storeId ? { "X-Store-User-Id": storeId } : {}),
+      ...init?.headers,
+    },
     ...init,
   });
 }

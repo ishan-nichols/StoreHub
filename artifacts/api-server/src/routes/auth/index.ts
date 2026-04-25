@@ -15,7 +15,7 @@ import { eq, and, gt } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   users, refreshTokens, authTokens, phoneOtps,
-  socialAccounts, webauthnCredentials, webauthnChallenges,
+  socialAccounts, webauthnCredentials, webauthnChallenges, storeProfiles,
 } from "@workspace/db";
 import {
   signAccessToken, signRefreshToken, verifyRefreshToken,
@@ -37,7 +37,7 @@ function userAgent(req: { headers: Record<string, string | string[] | undefined>
   return String(req.headers["user-agent"] ?? "unknown").slice(0, 250);
 }
 
-function sanitizeUser(user: { id: string; email: string | null; fullName: string; emailVerified: boolean; phoneNumber: string | null; role: string; createdAt: Date; lastLoginAt: Date | null }) {
+function sanitizeUser(user: { id: string; email: string | null; fullName: string; emailVerified: boolean; phoneNumber: string | null; role: string; businessId?: string | null; createdAt: Date; lastLoginAt: Date | null }) {
   return {
     id:            user.id,
     email:         user.email,
@@ -45,6 +45,7 @@ function sanitizeUser(user: { id: string; email: string | null; fullName: string
     emailVerified: user.emailVerified,
     phoneNumber:   user.phoneNumber,
     role:          user.role,
+    businessId:    user.businessId ?? null,
     createdAt:     user.createdAt,
     lastLoginAt:   user.lastLoginAt,
   };
@@ -76,6 +77,7 @@ router.post("/signup", async (req, res) => {
     fullName: fullName.trim(),
     passwordHash,
     emailVerified: false,
+    role: "business_owner",
   }).returning();
 
   // Generate email verification token
@@ -190,7 +192,31 @@ router.get("/me", async (req, res) => {
   const [user] = await db.select().from(users).where(eq(users.id, payload.userId)).limit(1);
   if (!user) return res.status(401).json({ error: "User not found" });
 
-  return res.json({ user: sanitizeUser(user) });
+  // If the role in the JWT doesn't match the DB (e.g. onboarding upgraded the user
+  // to business_owner but the old server never re-issued the token), silently re-issue
+  // the access token with the correct role so subsequent API calls pass middleware checks.
+  // Skip this during a switched-store session — those use a deliberately different role.
+  if (!payload.switchedFromUserId && user.role !== payload.role) {
+    const newAccessToken = signAccessToken({
+      userId: user.id,
+      email: user.email!,
+      role: user.role,
+    });
+    res.cookie("sh_access", newAccessToken, {
+      httpOnly: true,
+      path: "/",
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      maxAge: ACCESS_TOKEN_TTL_MS,
+    });
+  }
+
+  return res.json({
+    user: {
+      ...sanitizeUser(user),
+      switchedFromUserId: payload.switchedFromUserId ?? null,
+    }
+  });
 });
 
 // ─── Refresh Token ────────────────────────────────────────────────────────────
@@ -221,7 +247,18 @@ router.post("/refresh", async (req, res) => {
     return res.status(401).json({ error: "User not found" });
   }
 
-  const newAccessToken = signAccessToken({ userId: user.id, email: user.email!, role: user.role });
+  // Preserve switched-store mode across refresh. If the session is switched, the
+  // role must stay as payload.role ("store_owner") — using user.role would silently
+  // promote the session back to business_owner and break the switched session.
+  const isSwitched = Boolean(payload.switchedFromUserId);
+  const roleForToken = isSwitched ? payload.role : user.role;
+
+  const newAccessToken = signAccessToken({
+    userId: user.id,
+    email: user.email ?? user.id,
+    role: roleForToken,
+    ...(payload.switchedFromUserId ? { switchedFromUserId: payload.switchedFromUserId } : {}),
+  });
 
   res.cookie("sh_access", newAccessToken, {
     httpOnly: true,
@@ -231,7 +268,12 @@ router.post("/refresh", async (req, res) => {
     maxAge: ACCESS_TOKEN_TTL_MS,
   });
 
-  return res.json({ user: sanitizeUser(user) });
+  return res.json({
+    user: {
+      ...sanitizeUser(user),
+      switchedFromUserId: payload.switchedFromUserId ?? null,
+    },
+  });
 });
 
 // ─── Forgot Password ──────────────────────────────────────────────────────────
@@ -388,6 +430,7 @@ router.post("/phone/verify-otp", async (req, res) => {
       fullName: "User",
       phoneNumber: phone,
       emailVerified: true, // phone-verified accounts bypass email verification
+      role: "business_owner",
     }).returning();
     authUser = newUser;
   }
@@ -476,6 +519,7 @@ router.post("/social/:provider", async (req, res) => {
         email: email.toLowerCase(),
         fullName: fullName ?? email.split("@")[0],
         emailVerified: true,
+        role: "business_owner",
       }).returning();
       authUser = newUser;
     }
@@ -744,6 +788,104 @@ router.get("/webauthn/credentials", async (req, res) => {
 
   const creds = await db.select().from(webauthnCredentials).where(eq(webauthnCredentials.userId, payload.userId));
   return res.json({ credentials: creds.map(c => ({ id: c.credentialId, deviceName: c.deviceName, createdAt: c.createdAt })) });
+});
+
+// ─── Switch Store (business owner enters a store) ─────────────────────────────
+
+router.post("/switch-store", async (req, res) => {
+  const accessToken = req.cookies?.sh_access as string | undefined;
+  const payload = accessToken ? verifyAccessToken(accessToken) : null;
+  if (!payload) return res.status(401).json({ error: "Not authenticated" });
+  if (payload.role !== "business_owner") return res.status(403).json({ error: "Business owner access required" });
+
+  const { targetUserId } = req.body as { targetUserId: string };
+  if (!targetUserId) return res.status(400).json({ error: "targetUserId is required" });
+
+  try {
+    // Find the current user to get businessId
+    const [currentUser] = await db.select().from(users).where(eq(users.id, payload.userId)).limit(1);
+    if (!currentUser?.businessId) return res.status(400).json({ error: "Business owner has no business associated" });
+
+    // Verify target store belongs to this business
+    const [storeProfile] = await db.select().from(storeProfiles)
+      .where(and(eq(storeProfiles.userId, targetUserId), eq(storeProfiles.businessId, currentUser.businessId)))
+      .limit(1);
+    if (!storeProfile) return res.status(403).json({ error: "This store does not belong to your business" });
+
+    // Find the target store user
+    const [targetUser] = await db.select().from(users).where(eq(users.id, targetUserId)).limit(1);
+    if (!targetUser) return res.status(404).json({ error: "Store user not found" });
+
+    // Always issue store_owner role so the app renders StoreApp.
+    // This handles both sub-accounts (role=store_owner) and the business
+    // owner's own first store (role=business_owner, same userId).
+    const newAccessToken = signAccessToken({
+      userId: targetUserId,
+      email: targetUser.email ?? targetUser.id,
+      role: "store_owner",
+      switchedFromUserId: payload.userId,
+    });
+    const newRefreshToken = signRefreshToken({
+      userId: targetUserId,
+      email: targetUser.email ?? targetUser.id,
+      role: "store_owner",
+      switchedFromUserId: payload.userId,
+    });
+
+    await db.insert(refreshTokens).values({
+      userId: targetUserId,
+      tokenHash: hashToken(newRefreshToken),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      deviceInfo: "business-switch",
+    });
+
+    setAuthCookies(res, newAccessToken, newRefreshToken, true);
+    return res.json({ success: true, storeName: storeProfile.storeName });
+  } catch (error) {
+    return res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// ─── Restore Business (switch back to business owner session) ─────────────────
+
+router.post("/restore-business", async (req, res) => {
+  const accessToken = req.cookies?.sh_access as string | undefined;
+  const payload = accessToken ? verifyAccessToken(accessToken) : null;
+
+  const switchedFromUserId = payload?.switchedFromUserId;
+  if (!switchedFromUserId) {
+    return res.status(400).json({ error: "Not in a switched store session" });
+  }
+
+  try {
+    const [originalUser] = await db.select().from(users).where(eq(users.id, switchedFromUserId)).limit(1);
+    if (!originalUser || originalUser.role !== "business_owner") {
+      return res.status(400).json({ error: "Original business owner not found" });
+    }
+
+    const newAccessToken = signAccessToken({
+      userId: originalUser.id,
+      email: originalUser.email!,
+      role: originalUser.role,
+    });
+    const newRefreshToken = signRefreshToken({
+      userId: originalUser.id,
+      email: originalUser.email!,
+      role: originalUser.role,
+    });
+
+    await db.insert(refreshTokens).values({
+      userId: originalUser.id,
+      tokenHash: hashToken(newRefreshToken),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      deviceInfo: "business-restore",
+    });
+
+    setAuthCookies(res, newAccessToken, newRefreshToken, true);
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ error: (error as Error).message });
+  }
 });
 
 export default router;

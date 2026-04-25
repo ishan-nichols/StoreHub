@@ -19,7 +19,10 @@ export function CloudSyncBootstrap() {
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated) return;
-    if (!isCloudMode()) return;
+    // Always pull in store-view mode (business owner viewing a store).
+    // In normal mode, respect the stored storage-mode preference.
+    const isStoreView = !!sessionStorage.getItem("sh_active_store_id");
+    if (!isStoreView && !isCloudMode()) return;
     void pullAll().then((res) => {
       if (!res.ok) console.warn("[CloudSync] pull failed:", res.error);
       else window.dispatchEvent(new CustomEvent("storehub:cloud-hydrated"));

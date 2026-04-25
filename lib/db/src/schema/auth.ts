@@ -11,7 +11,7 @@ export const users = pgTable(
     passwordHash:   varchar("password_hash", { length: 255 }),
     emailVerified:  boolean("email_verified").notNull().default(false),
     phoneNumber:    varchar("phone_number", { length: 50 }).unique(),
-    role:           varchar("role", { length: 20 }).notNull().default("store_owner"), // 'superadmin' | 'business_owner' | 'store_owner'
+    role:           varchar("role", { length: 20 }).notNull().default("business_owner"), // 'superadmin' | 'business_owner' | 'store_owner'
     businessId:     uuid("business_id"),
     createdAt:      timestamp("created_at",   { withTimezone: true }).notNull().defaultNow(),
     lastLoginAt:    timestamp("last_login_at",{ withTimezone: true }),

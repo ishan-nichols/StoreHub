@@ -55,6 +55,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // When CloudSyncBootstrap finishes pulling store data into localStorage,
+  // refresh the profile so components reflect the selected store's info.
+  useEffect(() => {
+    const handler = () => void refreshProfile();
+    window.addEventListener("storehub:cloud-hydrated", handler);
+    return () => window.removeEventListener("storehub:cloud-hydrated", handler);
+  }, [refreshProfile]);
+
   const setProfile = useCallback(async (p: UserProfile) => {
     await saveUserProfile(p);
     setProfileState(p);

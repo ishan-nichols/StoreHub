@@ -11,6 +11,8 @@ import { requireAuth } from "../../middlewares/requireAuth.js";
 import { buildCrudRouter } from "./crud.js";
 import salesTaxRouter from "./salesTax.js";
 import locationsRouter from "./locations.js";
+import supplierIntelligenceRouter from "../suppliers/index.js";
+import employeePermissionsRouter from "./employee-permissions.js";
 
 const router: IRouter = Router();
 
@@ -46,12 +48,14 @@ profileRouter.put("/", async (req, res) => {
 router.use("/profile", profileRouter);
 router.use("/sales-tax", salesTaxRouter);
 router.use("/locations", locationsRouter);
+router.use("/supplier-intelligence", supplierIntelligenceRouter);
 
 // ─── Standard per-user collections via factory ─────────────────────────────
 router.use("/products",           buildCrudRouter({ table: products,              userIdCol: products.userId,              idCol: products.id,              orderByCol: products.createdAt }));
 router.use("/sales",              buildCrudRouter({ table: sales,                 userIdCol: sales.userId,                 idCol: sales.id,                 orderByCol: sales.createdAt }));
 router.use("/expenses",           buildCrudRouter({ table: expenses,              userIdCol: expenses.userId,              idCol: expenses.id,              orderByCol: expenses.date }));
 router.use("/suppliers",          buildCrudRouter({ table: suppliers,             userIdCol: suppliers.userId,             idCol: suppliers.id,             orderByCol: suppliers.createdAt }));
+router.use("/employees",          employeePermissionsRouter);
 router.use("/employees",          buildCrudRouter({ table: employees,             userIdCol: employees.userId,             idCol: employees.id,             orderByCol: employees.createdAt }));
 router.use("/shifts",             buildCrudRouter({ table: shifts,                userIdCol: shifts.userId,                idCol: shifts.id,                orderByCol: shifts.shiftStart }));
 router.use("/recurring-expenses", buildCrudRouter({ table: recurringExpenses,     userIdCol: recurringExpenses.userId,     idCol: recurringExpenses.id,     orderByCol: recurringExpenses.createdAt }));

@@ -1,4 +1,8 @@
 export type BusinessType = "cstore" | "grocery" | "butcher" | "bakery" | "liquor" | "clothing" | "general" | "restaurant" | "pharmacy" | "other";
+export type BusinessCategory = "food_beverage" | "retail" | "gas_station" | "service" | "other";
+export type FoodBevType = "restaurant" | "fastfood" | "cafe" | "bar" | "bakery";
+export type RetailType = "grocery" | "liquor" | "clothing" | "vape" | "general_retail";
+export type ServiceType = "salon" | "auto" | "cleaning" | "repair" | "other_service";
 export type PainPoint = "inventory" | "sales" | "employees" | "profits";
 export type Language = "en" | "es";
 export type Theme = "light" | "dark";
@@ -55,7 +59,7 @@ export interface UserProfile {
   onboardingCompleted: boolean;
   storeCity?: string;
   storeAddress?: string;
-  country?: "US" | "MX";
+  country?: "US" | "CA" | "MX";
   stateCode?: string;
   stateName?: string;
   printerName?: string;
@@ -80,6 +84,52 @@ export interface UserProfile {
 
   // ── Branding ──────────────────────────────────────────────────────────────
   logoDataUrl?: string;        // base64 data URL of the store logo
+
+  // ── Deep onboarding answers (v3) ─────────────────────────────────────────
+  businessCategory?: BusinessCategory;
+  foodBevType?: FoodBevType;
+  retailType?: RetailType;
+  serviceType?: ServiceType;
+
+  // Food & Bev specifics
+  servesAlcohol?: boolean;
+  doesDelivery?: boolean;
+  hasTables?: boolean;
+  hasDriveThrough?: boolean;
+  doesOnlineOrders?: boolean;
+  hasFoodMenu?: boolean;
+  doesMobileOrders?: boolean;
+  servesFood?: boolean;          // bar: serves any food
+  hasKitchen?: boolean;
+
+  // Retail specifics
+  sellsFreshProduce?: boolean;
+  sellsMeat?: boolean;
+  sellsHotFood?: boolean;
+  sellsSnacks?: boolean;
+  sellsLottery?: boolean;
+  clothingAudience?: string;
+  clothingModel?: string;
+  sellsTobacco?: boolean;
+  sellsCBD?: boolean;
+
+  // Gas station specifics
+  sellsFuel?: boolean;
+  hasCarWash?: boolean;
+  hasDeli?: boolean;
+  gasStationPos?: string;
+
+  // Service specifics
+  sellsRetailProducts?: boolean;
+  takesAppointments?: boolean;
+
+  // Other specifics
+  otherDescription?: string;
+  sellsPhysicalProducts?: boolean;
+  hasInventoryToTrack?: boolean;
+
+  // Universal (replaces storeSize)
+  staffCount?: "solo" | "small" | "medium" | "multi";
 }
 
 export type PosSyncStatus = "synced" | "pending" | "failed" | "not_connected";
@@ -175,14 +225,80 @@ export interface Supplier {
   createdAt: string;
 }
 
+export interface EmployeePermissions {
+  pos: boolean;
+  inventory: boolean;
+  sales: boolean;
+  expenses: boolean;
+  reports: boolean;
+  suppliers: boolean;
+  customers: boolean;
+  cashflow: boolean;
+  compliance: boolean;
+  tax: boolean;
+  employees: boolean;
+  settings: boolean;
+}
+
+export const DEFAULT_PERMISSIONS: EmployeePermissions = {
+  pos: true, inventory: false, sales: false, expenses: false,
+  reports: false, suppliers: false, customers: false, cashflow: false,
+  compliance: false, tax: false, employees: false, settings: false,
+};
+
+export const PERMISSION_TEMPLATES: Record<string, EmployeePermissions> = {
+  cashier: {
+    pos: true, inventory: false, sales: false, expenses: false,
+    reports: false, suppliers: false, customers: true, cashflow: false,
+    compliance: false, tax: false, employees: false, settings: false,
+  },
+  associate: {
+    pos: true, inventory: true, sales: true, expenses: false,
+    reports: false, suppliers: false, customers: true, cashflow: false,
+    compliance: false, tax: false, employees: false, settings: false,
+  },
+  supervisor: {
+    pos: true, inventory: true, sales: true, expenses: true,
+    reports: true, suppliers: true, customers: true, cashflow: false,
+    compliance: false, tax: false, employees: false, settings: false,
+  },
+  manager: {
+    pos: true, inventory: true, sales: true, expenses: true,
+    reports: true, suppliers: true, customers: true, cashflow: true,
+    compliance: true, tax: false, employees: true, settings: false,
+  },
+  owner: {
+    pos: true, inventory: true, sales: true, expenses: true,
+    reports: true, suppliers: true, customers: true, cashflow: true,
+    compliance: true, tax: true, employees: true, settings: true,
+  },
+};
+
+export const PERMISSION_LABELS: Record<keyof EmployeePermissions, string> = {
+  pos: "POS / Checkout",
+  inventory: "Inventory",
+  sales: "Sales & Orders",
+  expenses: "Expenses",
+  reports: "Reports",
+  suppliers: "Suppliers",
+  customers: "Customers",
+  cashflow: "Cash Flow",
+  compliance: "Compliance",
+  tax: "Tax Center",
+  employees: "Employee Management",
+  settings: "Settings",
+};
+
 export interface Employee {
   id: string;
   name: string;
   role: string;
+  jobTitle?: string;
   pin: string;
   hourlyWage: number;
   payrollType: "hourly" | "daily" | "salary";
   dailyWage: number;
+  permissions?: EmployeePermissions;
   createdAt: string;
 }
 

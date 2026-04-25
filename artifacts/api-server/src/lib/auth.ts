@@ -13,6 +13,31 @@ export interface JWTPayload {
   userId: string;
   email: string;
   role: string;
+  switchedFromUserId?: string;
+}
+
+// ─── Portal JWT (employee kiosk sessions) ────────────────────────────────────
+
+export interface PortalJWTPayload {
+  storeUserId: string;
+  employeeId?: string;
+  name: string;
+  isManager: boolean;
+  permissions: Record<string, boolean> | null; // null = all access (manager)
+}
+
+const PORTAL_SECRET = (process.env.JWT_SECRET ?? "storehub-dev-secret-change-in-prod") + "-portal-v1";
+
+export function signPortalToken(payload: PortalJWTPayload): string {
+  return jwt.sign(payload, PORTAL_SECRET, { expiresIn: "12h" });
+}
+
+export function verifyPortalToken(token: string): PortalJWTPayload | null {
+  try {
+    return jwt.verify(token, PORTAL_SECRET) as PortalJWTPayload;
+  } catch {
+    return null;
+  }
 }
 
 // ─── JWT helpers ─────────────────────────────────────────────────────────────

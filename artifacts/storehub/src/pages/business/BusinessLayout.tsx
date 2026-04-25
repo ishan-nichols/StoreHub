@@ -23,20 +23,25 @@ export default function BusinessLayout({ children }: { children: React.ReactNode
   function Sidebar() {
     return (
       <div className="flex h-full flex-col">
-        {/* Header card */}
+        {/* Header card — click to go home */}
         <div className="px-5 pb-5 pt-6">
-          <div className="glass-panel motion-card rounded-[28px] p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-700 text-white shadow-lg">
-                <Building2 size={20} />
+          <Link href="/business">
+            <a
+              onClick={() => setMobileOpen(false)}
+              className="glass-panel motion-card rounded-[28px] p-4 block w-full text-left hover:brightness-[1.02] transition-all active:scale-[0.99]"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-700 text-white shadow-lg">
+                  <Building2 size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-indigo-700/70">Business Owner</p>
+                  <h1 className="truncate text-base font-semibold text-stone-900">{user?.fullName ?? "My Business"}</h1>
+                  <p className="mt-1 text-xs text-stone-500">Multi-store management hub.</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-indigo-700/70">Business Owner</p>
-                <h1 className="truncate text-base font-semibold text-stone-900">{user?.fullName ?? "My Business"}</h1>
-                <p className="mt-1 text-xs text-stone-500">Multi-store management hub.</p>
-              </div>
-            </div>
-          </div>
+            </a>
+          </Link>
         </div>
 
         {/* Nav */}

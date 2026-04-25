@@ -1,10 +1,11 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, LogOut, PlusCircle, ShieldCheck, Store } from "lucide-react";
+import { LayoutDashboard, LogOut, PlusCircle, ShieldCheck, Store, Users } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 
 const NAV = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard, note: "Platform overview" },
-  { href: "/admin/stores", label: "Stores", icon: Store, note: "Manage accounts" },
+  { href: "/admin",        label: "Dashboard", icon: LayoutDashboard, note: "Platform overview" },
+  { href: "/admin/stores", label: "Stores",    icon: Store,           note: "Manage stores" },
+  { href: "/admin/users",  label: "Accounts",  icon: Users,           note: "All user accounts" },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -16,18 +17,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <aside className="hidden w-[320px] shrink-0 border-r border-white/40 bg-white/35 md:block">
         <div className="flex h-full flex-col">
           <div className="px-5 pb-5 pt-6">
-            <div className="glass-panel rounded-[28px] p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-stone-950 text-white">
-                  <ShieldCheck size={20} />
+            <Link href="/admin">
+              <a className="glass-panel motion-card rounded-[28px] p-4 block w-full text-left hover:brightness-[1.02] transition-all active:scale-[0.99]">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-stone-950 text-white">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400">Admin</p>
+                    <h1 className="text-base font-semibold text-stone-950">StoreHub Control</h1>
+                    <p className="mt-1 text-xs text-stone-500">Oversight for all stores, activity, and account setup.</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-400">Admin</p>
-                  <h1 className="text-base font-semibold text-stone-950">StoreHub Control</h1>
-                  <p className="mt-1 text-xs text-stone-500">Oversight for all stores, activity, and account setup.</p>
-                </div>
-              </div>
-            </div>
+              </a>
+            </Link>
           </div>
 
           <div className="flex-1 space-y-1 px-3">

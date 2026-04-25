@@ -1,178 +1,578 @@
-import { useState, useEffect } from "react";
-import { getEmployees, getShifts, clockIn, clockOut, getActiveShift, getUserProfile } from "../services/dataService";
-import type { Employee, Shift, UserProfile } from "../schemas";
-import { formatDate, formatTime, calcHoursWorked } from "../utils";
-import { LogIn, LogOut, Clock, Timer, ChevronLeft, User, Calendar, DollarSign } from "lucide-react";
+/**
+ * Employee Portal — unified kiosk for all store staff.
+ *
+ * Store identification (in order of priority):
+ *  1. localStorage key  "sh_portal_store_id"  → "store device" mode (set by manager)
+ *  2. URL query param   ?store=STORE_USER_ID   → personal device / shared link
+ *  3. Neither           → ask manager for the link
+ *
+ * Authentication: server-side PIN verification via /api/portal/:id/verify-pin.
+ * A short-lived portal JWT is stored in memory and used for clock-in/out.
+ *
+ * Location: browser Geolocation compared with store coordinates.
+ *  • Store device mode → location check skipped (device is already at the store).
+ *  • Personal device   → on-site badge if within 500 m.
+ */
 
-function formatElapsed(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  User, Clock, LogIn, LogOut, Timer, Calendar, DollarSign, MapPin,
+  Wifi, WifiOff, ChevronLeft, X, Link2, Shield, MonitorSmartphone,
+  ShoppingCart, Package, Receipt, Wallet, BarChart2, Truck,
+  Users, TrendingUp, UserCheck, Settings, Landmark,
+} from "lucide-react";
+import { API_BASE_URL } from "../services/dataService";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface StoreInfo {
+  storeName:      string;
+  storeCity:      string | null;
+  storeLatitude:  number | null;
+  storeLongitude: number | null;
+  employees:      { id: string; name: string; role: string }[];
 }
 
-function useTimer(shiftStart: string | null) {
-  const [elapsed, setElapsed] = useState(0);
+interface Identity {
+  type:        "employee" | "manager";
+  id:          string | null;
+  name:        string;
+  role:        string;
+  isManager:   boolean;
+  permissions: Record<string, boolean> | null;
+}
+
+interface ShiftRow {
+  id:          string;
+  shiftStart:  string;
+  shiftEnd:    string | null;
+  hoursWorked: number | null;
+}
+
+interface LocationStatus {
+  state:    "idle" | "checking" | "on_site" | "remote" | "unavailable";
+  distance: number | null;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const STORE_DEVICE_KEY = "sh_portal_store_id";
+const ON_SITE_METERS   = 500;
+
+const MODULE_CONFIG: Array<{
+  key: string; label: string; href: string;
+  icon: React.ElementType; color: string; bg: string;
+}> = [
+  { key: "pos",        label: "POS / Checkout",  href: "/pos",         icon: ShoppingCart, color: "text-amber-700",  bg: "bg-amber-100"  },
+  { key: "inventory",  label: "Inventory",        href: "/inventory",   icon: Package,      color: "text-blue-700",   bg: "bg-blue-100"   },
+  { key: "sales",      label: "Sales",            href: "/sales",       icon: Receipt,      color: "text-green-700",  bg: "bg-green-100"  },
+  { key: "expenses",   label: "Expenses",         href: "/expenses",    icon: Wallet,       color: "text-red-700",    bg: "bg-red-100"    },
+  { key: "reports",    label: "Reports",          href: "/reports",     icon: BarChart2,    color: "text-purple-700", bg: "bg-purple-100" },
+  { key: "suppliers",  label: "Suppliers",        href: "/suppliers",   icon: Truck,        color: "text-stone-700",  bg: "bg-stone-100"  },
+  { key: "customers",  label: "Customers",        href: "/customers",   icon: UserCheck,    color: "text-pink-700",   bg: "bg-pink-100"   },
+  { key: "cashflow",   label: "Cash Flow",        href: "/cashflow",    icon: TrendingUp,   color: "text-stone-700",  bg: "bg-stone-100"  },
+  { key: "employees",  label: "Employees",        href: "/employees",   icon: Users,        color: "text-indigo-700", bg: "bg-indigo-100" },
+  { key: "tax",        label: "Tax Center",       href: "/tax",         icon: Landmark,     color: "text-stone-700",  bg: "bg-stone-100"  },
+  { key: "settings",   label: "Settings",         href: "/settings",    icon: Settings,     color: "text-gray-700",   bg: "bg-gray-100"   },
+];
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6_371_000;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const a  = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatElapsed(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function fmtTime(d: string) {
+  return new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+function fmtDate(d: string) {
+  return new Date(d).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function useTimer(start: string | null) {
+  const [sec, setSec] = useState(0);
   useEffect(() => {
-    if (!shiftStart) { setElapsed(0); return; }
-    const update = () => {
-      setElapsed(Math.max(0, Math.floor((Date.now() - new Date(shiftStart).getTime()) / 1000)));
-    };
-    update();
-    const id = setInterval(update, 1000);
+    if (!start) { setSec(0); return; }
+    const tick = () => setSec(Math.max(0, Math.floor((Date.now() - new Date(start).getTime()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [shiftStart]);
-  return elapsed;
+  }, [start]);
+  return sec;
 }
 
-interface DayGroup {
-  date: string;
-  shifts: Shift[];
+// ─── Portal API calls (no auth cookie needed) ─────────────────────────────────
+
+const portalBase = (storeId: string) => `${API_BASE_URL}/api/portal/${storeId}`;
+
+async function apiGetInfo(storeId: string): Promise<StoreInfo> {
+  const r = await fetch(`${portalBase(storeId)}/info`);
+  if (!r.ok) throw new Error((await r.json()).error ?? "Store not found");
+  return r.json();
 }
 
-function groupByDay(shifts: Shift[]): DayGroup[] {
-  const map = new Map<string, Shift[]>();
-  for (const s of shifts) {
-    const d = new Date(s.shiftStart).toLocaleDateString();
-    if (!map.has(d)) map.set(d, []);
-    map.get(d)!.push(s);
+async function apiVerifyPin(storeId: string, pin: string): Promise<{ token: string; identity: Identity }> {
+  const r = await fetch(`${portalBase(storeId)}/verify-pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin }),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error ?? "Invalid PIN");
+  return data;
+}
+
+async function apiActiveShift(storeId: string, token: string): Promise<ShiftRow | null> {
+  const r = await fetch(`${portalBase(storeId)}/active-shift`, {
+    headers: { "x-portal-token": token },
+  });
+  if (!r.ok) return null;
+  return r.json();
+}
+
+async function apiMyShifts(storeId: string, token: string): Promise<ShiftRow[]> {
+  const r = await fetch(`${portalBase(storeId)}/my-shifts`, {
+    headers: { "x-portal-token": token },
+  });
+  if (!r.ok) return [];
+  return r.json();
+}
+
+async function apiClockIn(storeId: string, token: string): Promise<ShiftRow> {
+  const r = await fetch(`${portalBase(storeId)}/clock-in`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-portal-token": token },
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error ?? "Clock-in failed");
+  return d;
+}
+
+async function apiClockOut(storeId: string, token: string, shiftId: string): Promise<ShiftRow> {
+  const r = await fetch(`${portalBase(storeId)}/clock-out/${shiftId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-portal-token": token },
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error ?? "Clock-out failed");
+  return d;
+}
+
+// ─── Sub-screens ──────────────────────────────────────────────────────────────
+
+/** Shown when no store can be identified. */
+function NoStoreScreen() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-stone-100 to-amber-50 flex items-center justify-center p-6">
+      <div className="max-w-sm w-full text-center space-y-4">
+        <div className="w-20 h-20 bg-amber-100 rounded-3xl flex items-center justify-center mx-auto">
+          <MonitorSmartphone size={36} className="text-amber-600" />
+        </div>
+        <h1 className="text-2xl font-bold text-stone-800">Employee Portal</h1>
+        <p className="text-stone-500 text-sm leading-relaxed">
+          Ask your manager to share the portal link or set up this device as a store terminal.
+        </p>
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-left text-sm space-y-2">
+          <p className="font-semibold text-amber-800">How to get access:</p>
+          <ul className="text-amber-700 space-y-1 list-disc list-inside">
+            <li>Ask your manager for the portal link</li>
+            <li>Or have them open the <strong>Employees</strong> page and set up this device</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Location badge shown in the dashboard. */
+function LocationBadge({ loc, isDevice }: { loc: LocationStatus; isDevice: boolean }) {
+  if (isDevice) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+        <MonitorSmartphone size={11} /> Store Device
+      </span>
+    );
   }
-  return Array.from(map.entries())
-    .map(([date, shifts]) => ({ date, shifts }))
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  if (loc.state === "checking") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-stone-100 text-stone-500 animate-pulse">
+        <MapPin size={11} /> Checking location…
+      </span>
+    );
+  }
+  if (loc.state === "on_site") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+        <Wifi size={11} /> On-site
+        {loc.distance !== null && <span className="opacity-60 ml-0.5">· {Math.round(loc.distance)}m</span>}
+      </span>
+    );
+  }
+  if (loc.state === "remote") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
+        <WifiOff size={11} /> Remote
+        {loc.distance !== null && <span className="opacity-60 ml-0.5">· {Math.round(loc.distance / 1000)}km away</span>}
+      </span>
+    );
+  }
+  return null;
 }
 
-function getWeekShifts(shifts: Shift[]): Shift[] {
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  return shifts.filter((s) => new Date(s.shiftStart) >= weekAgo);
-}
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function EmployeePortalPage() {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [allShifts, setAllShifts] = useState<Shift[]>([]);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
-  const [pin, setPin] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [step, setStep] = useState<"select" | "pin" | "dashboard">("select");
-  const [search, setSearch] = useState("");
-  const [activeShift, setActiveShift] = useState<Shift | null>(null);
-  const elapsed = useTimer(activeShift?.shiftStart ?? null);
-  const [loading, setLoading] = useState(false);
+  // ── Store identification ──────────────────────────────────────────────────
 
-  async function load() {
-    const [emps, shfts, prof] = await Promise.all([getEmployees(), getShifts(), getUserProfile()]);
-    setEmployees(emps);
-    setAllShifts(shfts);
-    setProfile(prof);
-  }
+  const [storeId, setStoreId] = useState<string | null>(() => {
+    // 1. localStorage → store device mode
+    const saved = localStorage.getItem(STORE_DEVICE_KEY);
+    if (saved) return saved;
+    // 2. URL param ?store=
+    const params = new URLSearchParams(window.location.search);
+    return params.get("store");
+  });
 
-  useEffect(() => { load(); }, []);
+  const isDeviceMode = Boolean(storeId && localStorage.getItem(STORE_DEVICE_KEY) === storeId);
 
-  async function loadActiveShift(empId: string) {
-    const active = await getActiveShift(empId);
-    setActiveShift(active);
-  }
+  // ── Store data ────────────────────────────────────────────────────────────
 
-  function selectEmployee(emp: Employee) {
-    setSelectedEmployee(emp);
+  const [storeInfo,    setStoreInfo]    = useState<StoreInfo | null>(null);
+  const [storeLoading, setStoreLoading] = useState(false);
+  const [storeError,   setStoreError]   = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!storeId) return;
+    setStoreLoading(true);
+    apiGetInfo(storeId)
+      .then(setStoreInfo)
+      .catch(e => setStoreError((e as Error).message))
+      .finally(() => setStoreLoading(false));
+  }, [storeId]);
+
+  // ── Location ──────────────────────────────────────────────────────────────
+
+  const [loc, setLoc] = useState<LocationStatus>({ state: "idle", distance: null });
+
+  const checkLocation = useCallback(() => {
+    if (isDeviceMode || !storeInfo?.storeLatitude || !storeInfo?.storeLongitude) return;
+    if (!navigator.geolocation) { setLoc({ state: "unavailable", distance: null }); return; }
+    setLoc({ state: "checking", distance: null });
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const d = haversineM(
+          pos.coords.latitude, pos.coords.longitude,
+          storeInfo.storeLatitude!, storeInfo.storeLongitude!,
+        );
+        setLoc({ state: d <= ON_SITE_METERS ? "on_site" : "remote", distance: d });
+      },
+      () => setLoc({ state: "unavailable", distance: null }),
+      { timeout: 8000, maximumAge: 60_000 },
+    );
+  }, [isDeviceMode, storeInfo]);
+
+  // ── Session ───────────────────────────────────────────────────────────────
+
+  const [identity,      setIdentity]      = useState<Identity | null>(null);
+  const [portalToken,   setPortalToken]   = useState<string | null>(null);
+  const [activeShift,   setActiveShift]   = useState<ShiftRow | null>(null);
+  const [shifts,        setShifts]        = useState<ShiftRow[]>([]);
+  const [clockLoading,  setClockLoading]  = useState(false);
+
+  // ── PIN entry ─────────────────────────────────────────────────────────────
+
+  const [selectedEmp,  setSelectedEmp]  = useState<{ id: string; name: string; role: string } | null>(null);
+  const [pin,          setPin]          = useState("");
+  const [pinError,     setPinError]     = useState("");
+  const [pinLoading,   setPinLoading]   = useState(false);
+  const [showAllEmps,  setShowAllEmps]  = useState(false);
+
+  function resetSession() {
+    setIdentity(null);
+    setPortalToken(null);
+    setActiveShift(null);
+    setShifts([]);
+    setSelectedEmp(null);
     setPin("");
     setPinError("");
-    setStep("pin");
+    setLoc({ state: "idle", distance: null });
   }
 
-  function verifyPin() {
-    if (!selectedEmployee) return;
-    if (pin === selectedEmployee.pin) {
-      setStep("dashboard");
-      loadActiveShift(selectedEmployee.id);
-    } else {
-      setPinError("Incorrect PIN. Please try again.");
+  async function loadDashboard(token: string) {
+    const [active, hist] = await Promise.all([
+      apiActiveShift(storeId!, token),
+      apiMyShifts(storeId!, token),
+    ]);
+    setActiveShift(active);
+    setShifts(hist);
+  }
+
+  async function handlePinSubmit() {
+    if (pin.length !== 4 || !storeId) return;
+    setPinLoading(true);
+    setPinError("");
+    try {
+      const { token, identity: ident } = await apiVerifyPin(storeId, pin);
+      setPortalToken(token);
+      setIdentity(ident);
+      if (!ident.isManager) await loadDashboard(token);
+      checkLocation();
+    } catch (e) {
+      setPinError((e as Error).message);
       setPin("");
+    } finally {
+      setPinLoading(false);
     }
   }
 
-  function handleBack() {
-    setStep("select");
-    setSelectedEmployee(null);
-    setPin("");
-    setPinError("");
-    setActiveShift(null);
-  }
-
   async function handleClockIn() {
-    if (!selectedEmployee) return;
-    setLoading(true);
-    const shift = await clockIn(selectedEmployee.id, selectedEmployee.name);
-    setActiveShift(shift);
-    await load();
-    setLoading(false);
+    if (!storeId || !portalToken) return;
+    setClockLoading(true);
+    try {
+      const shift = await apiClockIn(storeId, portalToken);
+      setActiveShift(shift);
+      setShifts(prev => [shift, ...prev]);
+    } catch (e) { alert((e as Error).message); }
+    finally { setClockLoading(false); }
   }
 
   async function handleClockOut() {
-    if (!activeShift) return;
-    setLoading(true);
-    await clockOut(activeShift.id);
-    setActiveShift(null);
-    await load();
-    setLoading(false);
+    if (!storeId || !portalToken || !activeShift) return;
+    setClockLoading(true);
+    try {
+      const updated = await apiClockOut(storeId, portalToken, activeShift.id);
+      setActiveShift(null);
+      setShifts(prev => prev.map(s => s.id === updated.id ? updated : s));
+    } catch (e) { alert((e as Error).message); }
+    finally { setClockLoading(false); }
   }
 
-  const filteredEmployees = employees.filter((e) =>
-    e.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const elapsed = useTimer(activeShift?.shiftStart ?? null);
 
-  if (step === "select") {
+  // ── Early returns ─────────────────────────────────────────────────────────
+
+  if (!storeId) return <NoStoreScreen />;
+
+  if (storeLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <User size={32} className="text-white" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-800">Employee Portal</h1>
-            <p className="text-gray-400 text-sm mt-1">Select your name to sign in</p>
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 to-stone-100 flex items-center justify-center">
+        <div className="text-center space-y-2">
+          <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto animate-pulse">
+            <User size={24} className="text-white" />
           </div>
+          <p className="text-sm text-stone-500">Loading store…</p>
+        </div>
+      </div>
+    );
+  }
 
-          {employees.length === 0 ? (
-            <div className="bg-white rounded-2xl shadow p-8 text-center text-gray-400">
-              <p className="text-sm">No employees set up yet.</p>
-              <p className="text-xs mt-1">Ask your manager to add you to StoreHub.</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-              <div className="p-4 border-b border-gray-100">
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search employees..."
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
+  if (storeError || !storeInfo) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 to-stone-100 flex items-center justify-center p-6">
+        <div className="max-w-sm text-center space-y-3">
+          <p className="text-red-600 font-medium">Could not load store</p>
+          <p className="text-stone-500 text-sm">{storeError ?? "Unknown error"}</p>
+          <button onClick={() => window.location.reload()} className="text-amber-600 text-sm underline">Retry</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Dashboard (logged in) ─────────────────────────────────────────────────
+
+  if (identity) {
+    const perms = identity.permissions;
+    const visibleModules = perms === null
+      ? MODULE_CONFIG                                             // manager → all
+      : MODULE_CONFIG.filter(m => perms[m.key]);                 // employee → permitted only
+
+    const weeklyHours = shifts
+      .filter(s => s.shiftEnd && new Date(s.shiftStart) >= new Date(Date.now() - 7 * 86_400_000))
+      .reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
+
+    const totalHours = shifts
+      .filter(s => s.shiftEnd)
+      .reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
+
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50">
+        {/* Header */}
+        <div className="bg-amber-500 text-white px-4 py-4 shadow">
+          <div className="max-w-xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center font-bold text-sm shrink-0">
+                {identity.name.slice(0, 2).toUpperCase()}
               </div>
-              <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
-                {filteredEmployees.map((emp) => {
-                  const active = allShifts.find((s) => s.employeeId === emp.id && s.shiftEnd === null);
-                  return (
+              <div>
+                <div className="font-bold leading-tight">{identity.name}</div>
+                <div className="text-xs text-amber-100 flex items-center gap-1.5 flex-wrap">
+                  <span>{identity.role || (identity.isManager ? "Manager" : "Staff")}</span>
+                  <span>·</span>
+                  <span>{storeInfo.storeName}</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <LocationBadge loc={loc} isDevice={isDeviceMode} />
+              <button onClick={resetSession} className="text-amber-100 hover:text-white text-xs font-medium ml-2">
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-w-xl mx-auto p-4 space-y-4 pb-10">
+          {/* Manager banner */}
+          {identity.isManager && (
+            <div className="bg-white rounded-2xl shadow-sm border border-amber-200 p-4 flex items-center gap-3">
+              <Shield size={20} className="text-amber-500 shrink-0" />
+              <div>
+                <p className="font-semibold text-stone-800 text-sm">Manager Access</p>
+                <p className="text-xs text-stone-500">Full store access via portal. For advanced settings, use the manager dashboard.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Clock in/out — employees only */}
+          {!identity.isManager && (
+            <div className={`rounded-2xl p-6 text-center shadow-lg ${activeShift ? "bg-green-500 text-white" : "bg-white text-stone-800"}`}>
+              {activeShift ? (
+                <>
+                  <div className="text-sm font-semibold text-green-100 mb-1">Currently Working</div>
+                  <div className="text-5xl font-mono font-bold tabular-nums mb-1">{formatElapsed(elapsed)}</div>
+                  <div className="text-sm text-green-100 mb-5">
+                    Started {fmtTime(activeShift.shiftStart)} · {fmtDate(activeShift.shiftStart)}
+                  </div>
+                  <button
+                    onClick={handleClockOut}
+                    disabled={clockLoading}
+                    className="flex items-center gap-2 mx-auto bg-white text-green-600 font-bold rounded-xl px-8 py-3.5 text-lg hover:bg-green-50 disabled:opacity-50 transition-colors shadow"
+                  >
+                    <LogOut size={20} /> Clock Out
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Clock size={28} className="text-amber-500" />
+                  </div>
+                  <div className="text-lg font-bold mb-1">Not clocked in</div>
+                  <div className="text-sm text-stone-400 mb-5">
+                    {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                  </div>
+                  {/* Location gate for personal devices */}
+                  {!isDeviceMode && loc.state === "remote" ? (
+                    <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-sm text-orange-700">
+                      <p className="font-semibold">You appear to be away from the store</p>
+                      <p className="text-xs mt-0.5 text-orange-500">Clock-in is available when you're on-site or on a store device.</p>
+                    </div>
+                  ) : (
                     <button
-                      key={emp.id}
-                      onClick={() => selectEmployee(emp)}
-                      className="w-full flex items-center gap-4 px-5 py-4 hover:bg-amber-50 transition-colors text-left"
+                      onClick={handleClockIn}
+                      disabled={clockLoading || (!isDeviceMode && loc.state === "checking")}
+                      className="flex items-center gap-2 mx-auto bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl px-8 py-3.5 text-lg disabled:opacity-50 transition-colors shadow"
                     >
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${active ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-                        {emp.name.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-gray-800">{emp.name}</div>
-                        <div className="text-xs text-gray-400">{emp.role || "Staff"}</div>
-                      </div>
-                      {active && (
-                        <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold flex-shrink-0">
-                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> Active
-                        </span>
-                      )}
+                      <LogIn size={20} /> Clock In
                     </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Stats */}
+          {!identity.isManager && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white rounded-2xl p-4 shadow-sm">
+                <div className="flex items-center gap-1.5 text-xs text-stone-400 font-semibold mb-1">
+                  <Timer size={11} /> THIS WEEK
+                </div>
+                <div className="text-2xl font-bold text-stone-800">{weeklyHours.toFixed(1)}h</div>
+              </div>
+              <div className="bg-white rounded-2xl p-4 shadow-sm">
+                <div className="flex items-center gap-1.5 text-xs text-stone-400 font-semibold mb-1">
+                  <Calendar size={11} /> ALL TIME (30d)
+                </div>
+                <div className="text-2xl font-bold text-stone-800">{totalHours.toFixed(1)}h</div>
+              </div>
+            </div>
+          )}
+
+          {/* Module access */}
+          {visibleModules.length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-stone-100">
+                <h3 className="font-bold text-stone-800">Your Tools</h3>
+                {!isDeviceMode && (
+                  <p className="text-xs text-stone-400 mt-0.5">Opens in the store management app — requires an active manager session on this device.</p>
+                )}
+              </div>
+              <div className="p-4 grid grid-cols-3 gap-2">
+                {visibleModules.map(mod => {
+                  const Icon = mod.icon;
+                  return (
+                    <a
+                      key={mod.key}
+                      href={mod.href}
+                      className="flex flex-col items-center gap-2 p-3 rounded-2xl border-2 border-transparent hover:border-amber-200 hover:bg-amber-50 transition-all"
+                    >
+                      <div className={`w-11 h-11 ${mod.bg} rounded-xl flex items-center justify-center`}>
+                        <Icon size={20} className={mod.color} />
+                      </div>
+                      <span className="text-xs font-semibold text-stone-700 text-center leading-tight">{mod.label}</span>
+                    </a>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Shift history */}
+          {!identity.isManager && shifts.filter(s => s.shiftEnd).length > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-stone-100">
+                <h3 className="font-bold text-stone-800">Recent Shifts</h3>
+              </div>
+              <div className="divide-y divide-stone-50">
+                {shifts.filter(s => s.shiftEnd).slice(0, 10).map(s => (
+                  <div key={s.id} className="flex items-center justify-between px-4 py-3 text-sm">
+                    <div>
+                      <span className="font-medium text-stone-700">{fmtDate(s.shiftStart)}</span>
+                      <span className="text-stone-400 ml-2">{fmtTime(s.shiftStart)} – {fmtTime(s.shiftEnd!)}</span>
+                    </div>
+                    {s.hoursWorked !== null && (
+                      <span className="font-semibold text-amber-600">{s.hoursWorked.toFixed(1)}h</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Account linking placeholder */}
+          {!identity.isManager && (
+            <div className="bg-white rounded-2xl shadow-sm p-4 flex items-start gap-3">
+              <div className="w-9 h-9 bg-indigo-100 rounded-xl flex items-center justify-center shrink-0">
+                <Link2 size={16} className="text-indigo-600" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-stone-800">Link a full account</p>
+                <p className="text-xs text-stone-400 mt-0.5">
+                  Connect your email & password to access the store from your own device. Coming soon.
+                </p>
               </div>
             </div>
           )}
@@ -181,35 +581,94 @@ export default function EmployeePortalPage() {
     );
   }
 
-  if (step === "pin" && selectedEmployee) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm">
-          <button onClick={handleBack} className="flex items-center gap-1 text-gray-500 hover:text-gray-700 text-sm mb-6">
-            <ChevronLeft size={16} /> Back
-          </button>
-          <div className="bg-white rounded-2xl shadow-xl p-8 space-y-6">
-            <div className="text-center">
-              <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3 text-xl font-bold text-amber-700">
-                {selectedEmployee.name.slice(0, 2).toUpperCase()}
+  // ── PIN Entry screen ──────────────────────────────────────────────────────
+
+  const displayedEmps = showAllEmps ? storeInfo.employees : storeInfo.employees.slice(0, 8);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm space-y-4">
+        {/* Store header */}
+        <div className="text-center">
+          <div className="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
+            <User size={30} className="text-white" />
+          </div>
+          <h1 className="text-xl font-bold text-stone-800">{storeInfo.storeName}</h1>
+          {storeInfo.storeCity && <p className="text-sm text-stone-400">{storeInfo.storeCity}</p>}
+          {isDeviceMode && (
+            <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+              <MonitorSmartphone size={11} /> Store Device
+            </span>
+          )}
+        </div>
+
+        {/* Employee selector or direct PIN */}
+        {!selectedEmp ? (
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+            {storeInfo.employees.length === 0 ? (
+              <div className="p-8 text-center text-stone-400 text-sm">
+                No employees set up yet.
+                <br />Ask your manager to add staff in the Employees page.
               </div>
-              <h2 className="text-lg font-bold text-gray-800">{selectedEmployee.name}</h2>
-              <p className="text-sm text-gray-400">{selectedEmployee.role || "Staff"}</p>
+            ) : (
+              <>
+                <div className="px-4 pt-4 pb-2 border-b border-stone-100">
+                  <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">Select your name</p>
+                </div>
+                <div className="divide-y divide-stone-50 max-h-72 overflow-y-auto">
+                  {displayedEmps.map(emp => (
+                    <button
+                      key={emp.id}
+                      onClick={() => { setSelectedEmp(emp); setPin(""); setPinError(""); }}
+                      className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-amber-50 transition-colors text-left"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold shrink-0">
+                        {emp.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="font-semibold text-stone-800 text-sm">{emp.name}</div>
+                        {emp.role && <div className="text-xs text-stone-400">{emp.role}</div>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                {storeInfo.employees.length > 8 && !showAllEmps && (
+                  <button
+                    onClick={() => setShowAllEmps(true)}
+                    className="w-full py-3 text-xs text-amber-600 font-semibold border-t border-stone-100 hover:bg-amber-50 transition-colors"
+                  >
+                    Show all {storeInfo.employees.length} employees
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          // PIN pad for selected employee
+          <div className="bg-white rounded-2xl shadow-xl p-6 space-y-5">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => { setSelectedEmp(null); setPin(""); setPinError(""); }}
+                className="p-1 text-stone-400 hover:text-stone-600 rounded-lg"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center font-bold text-amber-700 text-sm">
+                  {selectedEmp.name.slice(0, 2).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-bold text-stone-800 text-sm">{selectedEmp.name}</div>
+                  <div className="text-xs text-stone-400">{selectedEmp.role || "Staff"}</div>
+                </div>
+              </div>
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-3 text-center">Enter your 4-digit PIN</label>
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={pin}
-                onChange={(e) => { setPin(e.target.value.replace(/\D/g, "").slice(0, 4)); setPinError(""); }}
-                onKeyDown={(e) => e.key === "Enter" && verifyPin()}
-                placeholder="••••"
-                className="w-full border-2 border-gray-200 rounded-xl px-4 py-4 text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-amber-400 font-mono"
-                autoFocus
-              />
+              <label className="block text-xs font-semibold text-stone-500 mb-2 text-center">Enter your 4-digit PIN</label>
+              <div className="w-full border-2 border-stone-200 rounded-xl px-4 py-4 text-center text-3xl tracking-[0.6em] font-mono text-stone-800 focus:border-amber-400 outline-none bg-stone-50 select-none">
+                {pin.length === 0 ? "·  ·  ·  ·" : "•".repeat(pin.length).padEnd(4, "·").replace(/·/g, " ·").trim()}
+              </div>
               {pinError && <p className="text-red-500 text-xs text-center mt-2">{pinError}</p>}
             </div>
 
@@ -218,177 +677,51 @@ export default function EmployeePortalPage() {
               {["1","2","3","4","5","6","7","8","9","","0","⌫"].map((key, i) => (
                 <button
                   key={i}
+                  disabled={key === "" || pinLoading}
                   onClick={() => {
-                    if (key === "⌫") { setPin((p) => p.slice(0, -1)); setPinError(""); }
-                    else if (key !== "" && pin.length < 4) { const next = pin + key; setPin(next); setPinError(""); if (next.length === 4) { setTimeout(() => { setPin(next); }, 0); } }
+                    if (key === "⌫") { setPin(p => p.slice(0, -1)); setPinError(""); }
+                    else if (key && pin.length < 4) {
+                      const next = pin + key;
+                      setPin(next);
+                      setPinError("");
+                      if (next.length === 4) {
+                        // auto-submit
+                        setTimeout(async () => {
+                          setPinLoading(true);
+                          setPinError("");
+                          try {
+                            const { token, identity: ident } = await apiVerifyPin(storeId!, next);
+                            setPortalToken(token);
+                            setIdentity(ident);
+                            if (!ident.isManager) await loadDashboard(token);
+                            checkLocation();
+                          } catch (e) {
+                            setPinError((e as Error).message);
+                            setPin("");
+                          } finally {
+                            setPinLoading(false);
+                          }
+                        }, 80);
+                      }
+                    }
                   }}
-                  disabled={key === ""}
-                  className={`h-14 rounded-xl text-lg font-semibold transition-all ${
-                    key === "" ? "opacity-0 cursor-default" : "bg-gray-100 hover:bg-amber-100 active:scale-95 text-gray-700"
+                  className={`h-14 rounded-xl text-lg font-semibold transition-all active:scale-95 ${
+                    key === "" ? "opacity-0 pointer-events-none" :
+                    pinLoading ? "bg-stone-100 text-stone-300 cursor-not-allowed" :
+                    "bg-stone-100 hover:bg-amber-100 text-stone-700"
                   }`}
                 >
-                  {key}
+                  {pinLoading && key === "⌫" ? "…" : key}
                 </button>
               ))}
             </div>
-
-            <button
-              onClick={verifyPin}
-              disabled={pin.length !== 4}
-              className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-xl py-4 transition-colors"
-            >
-              Sign In
-            </button>
           </div>
-        </div>
+        )}
+
+        <p className="text-center text-xs text-stone-400">
+          Powered by <span className="font-semibold text-amber-600">StoreHub</span>
+        </p>
       </div>
-    );
-  }
-
-  if (step === "dashboard" && selectedEmployee) {
-    const myShifts = allShifts.filter((s) => s.employeeId === selectedEmployee.id && s.shiftEnd !== null);
-    const weekShifts = getWeekShifts(myShifts);
-    const weekHours = weekShifts.reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
-    const totalHours = myShifts.reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
-    const weekPay = (weekHours * selectedEmployee.hourlyWage).toFixed(2);
-    const totalPay = (totalHours * selectedEmployee.hourlyWage).toFixed(2);
-    const cs = profile?.currencySymbol ?? "$";
-    const dayGroups = groupByDay(myShifts).slice(0, 10);
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50">
-        {/* Header */}
-        <div className="bg-amber-500 text-white px-4 py-5 shadow-md">
-          <div className="max-w-xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center font-bold text-sm">
-                {selectedEmployee.name.slice(0, 2).toUpperCase()}
-              </div>
-              <div>
-                <div className="font-bold">{selectedEmployee.name}</div>
-                <div className="text-xs text-amber-100">{selectedEmployee.role || "Staff"}</div>
-              </div>
-            </div>
-            <button onClick={handleBack} className="text-amber-100 hover:text-white text-sm font-medium">Sign Out</button>
-          </div>
-        </div>
-
-        <div className="max-w-xl mx-auto p-4 space-y-4">
-          {/* Clock in/out card */}
-          <div className={`rounded-2xl p-6 text-center shadow-lg ${activeShift ? "bg-green-500 text-white" : "bg-white text-gray-800"}`}>
-            {activeShift ? (
-              <>
-                <div className="text-sm font-semibold text-green-100 mb-1">Currently Working</div>
-                <div className="text-5xl font-mono font-bold tabular-nums mb-1">{formatElapsed(elapsed)}</div>
-                <div className="text-sm text-green-100 mb-5">
-                  Started at {formatTime(activeShift.shiftStart)} · {formatDate(activeShift.shiftStart)}
-                </div>
-                <button
-                  onClick={handleClockOut}
-                  disabled={loading}
-                  className="flex items-center gap-2 mx-auto bg-white text-green-600 font-bold rounded-xl px-8 py-3.5 text-lg hover:bg-green-50 transition-colors shadow"
-                >
-                  <LogOut size={20} /> Clock Out
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Clock size={28} className="text-amber-500" />
-                </div>
-                <div className="text-lg font-bold text-gray-800 mb-1">Not clocked in</div>
-                <div className="text-sm text-gray-400 mb-5">
-                  {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-                </div>
-                <button
-                  onClick={handleClockIn}
-                  disabled={loading}
-                  className="flex items-center gap-2 mx-auto bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl px-8 py-3.5 text-lg transition-colors shadow"
-                >
-                  <LogIn size={20} /> Clock In
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Stats row */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-white rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center gap-2 text-xs text-gray-400 font-semibold mb-1">
-                <Timer size={12} /> THIS WEEK
-              </div>
-              <div className="text-2xl font-bold text-gray-800">{weekHours.toFixed(1)}h</div>
-              {selectedEmployee.hourlyWage > 0 && (
-                <div className="text-sm text-amber-600 font-semibold mt-0.5">{cs}{weekPay} est.</div>
-              )}
-            </div>
-            <div className="bg-white rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center gap-2 text-xs text-gray-400 font-semibold mb-1">
-                <Calendar size={12} /> ALL TIME
-              </div>
-              <div className="text-2xl font-bold text-gray-800">{totalHours.toFixed(1)}h</div>
-              {selectedEmployee.hourlyWage > 0 && (
-                <div className="text-sm text-amber-600 font-semibold mt-0.5">{cs}{totalPay} est.</div>
-              )}
-            </div>
-          </div>
-
-          {/* Rate card */}
-          {selectedEmployee.hourlyWage > 0 && (
-            <div className="bg-white rounded-2xl p-4 shadow-sm flex items-center gap-3">
-              <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <DollarSign size={18} className="text-amber-600" />
-              </div>
-              <div>
-                <div className="text-xs text-gray-400 font-semibold">YOUR HOURLY RATE</div>
-                <div className="text-lg font-bold text-gray-800">{cs}{selectedEmployee.hourlyWage.toFixed(2)}/hour</div>
-              </div>
-            </div>
-          )}
-
-          {/* Shift history */}
-          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100">
-              <h3 className="font-bold text-gray-800">Shift History</h3>
-            </div>
-            {dayGroups.length === 0 ? (
-              <div className="p-8 text-center text-gray-400 text-sm">No shifts logged yet</div>
-            ) : (
-              <div className="divide-y divide-gray-50">
-                {dayGroups.map((group) => (
-                  <div key={group.date} className="p-4">
-                    <div className="text-xs font-semibold text-gray-400 mb-2">
-                      {new Date(group.date).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
-                    </div>
-                    {group.shifts.map((shift) => {
-                      const shiftPay = shift.hoursWorked && selectedEmployee.hourlyWage > 0
-                        ? (shift.hoursWorked * selectedEmployee.hourlyWage).toFixed(2)
-                        : null;
-                      return (
-                        <div key={shift.id} className="flex items-center justify-between py-1.5">
-                          <div className="text-sm text-gray-700">
-                            {formatTime(shift.shiftStart)} — {shift.shiftEnd ? formatTime(shift.shiftEnd) : "ongoing"}
-                          </div>
-                          <div className="flex items-center gap-3 text-sm">
-                            {shift.hoursWorked !== null && (
-                              <span className="font-semibold text-amber-600">{shift.hoursWorked.toFixed(1)}h</span>
-                            )}
-                            {shiftPay && (
-                              <span className="text-gray-400">{cs}{shiftPay}</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
+    </div>
+  );
 }

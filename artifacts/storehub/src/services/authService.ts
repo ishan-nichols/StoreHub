@@ -21,6 +21,7 @@ export interface AuthUser {
   phoneNumber:   string | null;
   role:          string;
   businessId?:   string;
+  switchedFromUserId?: string | null;
   createdAt:     string;
   lastLoginAt:   string | null;
 }
@@ -248,6 +249,29 @@ export async function updateAuthProfile(updates: {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "Update failed");
   return data.user;
+}
+
+// ─── Store Switching ──────────────────────────────────────────────────────────
+
+export async function switchToStore(targetUserId: string): Promise<{ storeName: string }> {
+  const res = await authFetch("/switch-store", {
+    method: "POST",
+    body: JSON.stringify({ targetUserId }),
+  });
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+    throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Failed to switch store");
+  return data;
+}
+
+export async function restoreBusinessSession(): Promise<void> {
+  const res = await authFetch("/restore-business", { method: "POST" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Failed to restore business session");
 }
 
 // ─── Password strength helper (client-side) ───────────────────────────────────

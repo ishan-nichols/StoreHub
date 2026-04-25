@@ -158,6 +158,8 @@ export const sales = pgTable("sales", {
   change:        doublePrecision("change").notNull().default(0),
   receiptNumber: varchar("receipt_number", { length: 100 }).notNull().default(""),
   note:          text("note").notNull().default(""),
+  customerPhone: varchar("customer_phone", { length: 50 }),
+  customerId:    uuid("customer_id"),
   createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   byUser:      index("sales_user_idx").on(t.userId),
@@ -201,6 +203,8 @@ export const employees = pgTable("employees", {
   hourlyWage:  doublePrecision("hourly_wage").notNull().default(0),
   payrollType: varchar("payroll_type", { length: 20 }).notNull().default("hourly"),
   dailyWage:   numeric("daily_wage", { precision: 10, scale: 2 }).default("0"),
+  jobTitle:    varchar("job_title", { length: 100 }),
+  permissions: jsonb("permissions").$type<Record<string, boolean>>(),
   createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ byUser: index("employees_user_idx").on(t.userId) }));
 
@@ -313,3 +317,49 @@ export const dailyPayRecords = pgTable("daily_pay_records", {
 
 export type DailyPayRecord       = typeof dailyPayRecords.$inferSelect;
 export type InsertDailyPayRecord = typeof dailyPayRecords.$inferInsert;
+
+// ─── Customers ──────────────────────────────────────────────────────────────
+export const customers = pgTable("customers", {
+  id:            uuid("id").primaryKey().defaultRandom(),
+  userId:        userRef(),
+  name:          varchar("name", { length: 255 }).notNull().default(""),
+  phone:         varchar("phone", { length: 50 }),
+  email:         varchar("email", { length: 255 }),
+  notes:         text("notes"),
+  loyaltyPoints: doublePrecision("loyalty_points").notNull().default(0),
+  totalSpent:    doublePrecision("total_spent").notNull().default(0),
+  visitCount:    integer("visit_count").notNull().default(0),
+  lastVisitAt:   timestamp("last_visit_at", { withTimezone: true }),
+  tags:          jsonb("tags").notNull().default([]),
+  createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  byUser:  index("customers_user_idx").on(t.userId),
+  byPhone: index("customers_phone_idx").on(t.userId, t.phone),
+}));
+
+export type Customer       = typeof customers.$inferSelect;
+export type InsertCustomer = typeof customers.$inferInsert;
+
+// ─── Shrinkage Log ────────────────────────────────────────────────────────────
+export const shrinkageLog = pgTable("shrinkage_log", {
+  id:              uuid("id").primaryKey().defaultRandom(),
+  userId:          userRef(),
+  productId:       uuid("product_id"),
+  productName:     varchar("product_name", { length: 500 }).notNull(),
+  category:        varchar("category", { length: 100 }).notNull().default(""),
+  expectedQty:     doublePrecision("expected_qty").notNull(),
+  actualQty:       doublePrecision("actual_qty").notNull(),
+  discrepancy:     doublePrecision("discrepancy").notNull(),
+  costPerUnit:     doublePrecision("cost_per_unit").notNull().default(0),
+  totalCostImpact: doublePrecision("total_cost_impact").notNull().default(0),
+  resolvedAs:      varchar("resolved_as", { length: 30 }),
+  resolvedAt:      timestamp("resolved_at", { withTimezone: true }),
+  notes:           text("notes"),
+  detectedAt:      timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  byUser: index("shrinkage_log_user_idx").on(t.userId),
+  byDate: index("shrinkage_log_date_idx").on(t.userId, t.detectedAt),
+}));
+
+export type ShrinkageLogEntry       = typeof shrinkageLog.$inferSelect;
+export type InsertShrinkageLogEntry = typeof shrinkageLog.$inferInsert;

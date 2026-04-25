@@ -15,7 +15,45 @@ import {
 import type { Employee, Shift, InsertEmployee, InsertShift, DailyPayRecord, PayrollReportEntry } from "../schemas";
 import { formatDate, formatTime, calcHoursWorked, now, getCurrencySymbol } from "../utils";
 import CurrencyInput from "../components/CurrencyInput";
-import { Plus, Trash2, X, Clock, UserPlus, LogIn, LogOut, Timer, Calendar, BarChart2 } from "lucide-react";
+import { Plus, Trash2, X, Clock, UserPlus, LogIn, LogOut, Timer, Calendar, BarChart2, Sparkles, Loader2, ShieldCheck, Copy, Check, ExternalLink } from "lucide-react";
+
+interface EmployeePermissions {
+  pos: boolean;
+  inventory: boolean;
+  sales: boolean;
+  expenses: boolean;
+  reports: boolean;
+  suppliers: boolean;
+  customers: boolean;
+  cashflow: boolean;
+  compliance: boolean;
+  tax: boolean;
+  employees: boolean;
+  settings: boolean;
+}
+
+const PERMISSION_LABELS: Record<string, string> = {
+  pos: "POS / Checkout",
+  inventory: "Inventory",
+  sales: "Sales & Orders",
+  expenses: "Expenses",
+  reports: "Reports",
+  suppliers: "Suppliers",
+  customers: "Customers",
+  cashflow: "Cash Flow",
+  compliance: "Compliance",
+  tax: "Tax Center",
+  employees: "Employee Mgmt",
+  settings: "Settings",
+};
+
+const PERMISSION_KEYS = ["pos","inventory","sales","expenses","reports","suppliers","customers","cashflow","compliance","tax","employees","settings"] as const;
+
+const DEFAULT_PERMISSIONS: EmployeePermissions = {
+  pos: true, inventory: false, sales: false, expenses: false,
+  reports: false, suppliers: false, customers: true, cashflow: false,
+  compliance: false, tax: false, employees: false, settings: false,
+};
 
 function formatElapsed(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -180,6 +218,74 @@ function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onRecordDay, on
           </div>
         </div>
       )}
+
+      {/* Permission summary */}
+      {(() => {
+        const perms = (emp as Employee & { permissions?: EmployeePermissions }).permissions;
+        if (!perms) return null;
+        const enabledCount = PERMISSION_KEYS.filter(k => perms[k]).length;
+        const highlights: string[] = [];
+        if (perms.pos) highlights.push("POS");
+        if (perms.inventory) highlights.push("Inventory");
+        if (perms.employees) highlights.push("Employees");
+        return (
+          <div className="border-t border-gray-100 dark:border-gray-700 pt-3 mt-3 flex items-center gap-2">
+            <ShieldCheck size={12} className="text-gray-400 flex-shrink-0" />
+            <span className="text-xs text-gray-400">
+              <span className="font-semibold text-gray-600 dark:text-gray-300">{enabledCount}</span> permissions
+              {highlights.length > 0 && <> · {highlights.join(", ")}</>}
+            </span>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+function EmployeePortalBanner() {
+  const portalUrl = `${window.location.origin}/employee`;
+  const [copied, setCopied] = useState(false);
+
+  function copy() {
+    void navigator.clipboard.writeText(portalUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-white text-lg">
+            👷
+          </div>
+          <div className="min-w-0">
+            <p className="font-semibold text-amber-900 dark:text-amber-200 text-sm">Employee Portal</p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+              Share this link with your staff so they can clock in/out and access their tools.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <a
+            href="/employee"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-white dark:bg-amber-900/40 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition-colors"
+          >
+            <ExternalLink size={12} /> Open
+          </a>
+          <button
+            onClick={copy}
+            className="flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+          >
+            {copied ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy Link</>}
+          </button>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2 rounded-xl bg-white/70 dark:bg-black/20 border border-amber-200 dark:border-amber-700 px-3 py-2">
+        <span className="text-xs font-mono text-amber-800 dark:text-amber-300 truncate flex-1">{portalUrl}</span>
+      </div>
     </div>
   );
 }
@@ -193,7 +299,9 @@ export default function EmployeesPage() {
   const [showLogShift, setShowLogShift] = useState(false);
   const [showRecordDay, setShowRecordDay] = useState(false);
   const [showPayrollReport, setShowPayrollReport] = useState(false);
-  const [newEmployee, setNewEmployee] = useState({ name: "", role: "", hourlyWage: 15, dailyWage: 0, payrollType: "hourly" as "hourly" | "daily" | "salary", pin: "" });
+  const [newEmployee, setNewEmployee] = useState({ name: "", role: "", jobTitle: "", hourlyWage: 15, dailyWage: 0, payrollType: "hourly" as "hourly" | "daily" | "salary", pin: "", permissions: { ...DEFAULT_PERMISSIONS } });
+  const [suggestingPermissions, setSuggestingPermissions] = useState(false);
+  const [suggestExplanation, setSuggestExplanation] = useState("");
   const [shiftForm, setShiftForm] = useState<InsertShift>({
     employeeId: "",
     employeeName: "",
@@ -232,14 +340,39 @@ export default function EmployeesPage() {
     await createEmployee({
       name:        newEmployee.name.trim(),
       role:        newEmployee.role.trim(),
+      jobTitle:    newEmployee.jobTitle.trim(),
       hourlyWage:  newEmployee.payrollType === "hourly" ? newEmployee.hourlyWage : 0,
       dailyWage:   newEmployee.payrollType !== "hourly" ? newEmployee.dailyWage  : 0,
       payrollType: newEmployee.payrollType,
       pin:         newEmployee.pin || "0000",
-    });
-    setNewEmployee({ name: "", role: "", hourlyWage: 15, dailyWage: 0, payrollType: "hourly", pin: "" });
+      permissions: newEmployee.permissions,
+    } as Parameters<typeof createEmployee>[0]);
+    setNewEmployee({ name: "", role: "", jobTitle: "", hourlyWage: 15, dailyWage: 0, payrollType: "hourly", pin: "", permissions: { ...DEFAULT_PERMISSIONS } });
+    setSuggestExplanation("");
     setShowAddEmployee(false);
     load();
+  }
+
+  async function suggestPermissions(jobTitle: string) {
+    if (!jobTitle.trim()) return;
+    setSuggestingPermissions(true);
+    try {
+      const res = await fetch("/api/store/employees/suggest-permissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobTitle }),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (res.ok && data.permissions) {
+        setNewEmployee(prev => ({ ...prev, permissions: data.permissions }));
+        setSuggestExplanation(data.explanation ?? "");
+      }
+    } catch (e) {
+      console.error("Permission suggest failed", e);
+    } finally {
+      setSuggestingPermissions(false);
+    }
   }
 
   async function handleDeleteEmployee(id: string) {
@@ -333,6 +466,8 @@ export default function EmployeesPage() {
           <UserPlus size={16} /> {t.employees.addEmployee}
         </button>
       </div>
+
+      <EmployeePortalBanner />
 
       {loading ? (
         <div className="text-center text-gray-400 py-12 text-sm">Loading...</div>
@@ -451,12 +586,12 @@ export default function EmployeesPage() {
       {/* Add Employee Modal */}
       {showAddEmployee && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
               <h2 className="font-bold text-gray-800 dark:text-gray-100">{t.employees.addEmployee}</h2>
-              <button onClick={() => setShowAddEmployee(false)} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"><X size={18} /></button>
+              <button onClick={() => { setShowAddEmployee(false); setSuggestExplanation(""); }} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"><X size={18} /></button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-xs font-semibold text-gray-500 mb-1.5">Full Name *</label>
                 <input
@@ -467,14 +602,25 @@ export default function EmployeesPage() {
                   autoFocus
                 />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Role</label>
-                <input
-                  value={newEmployee.role}
-                  onChange={(e) => setNewEmployee((p) => ({ ...p, role: e.target.value }))}
-                  className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
-                  placeholder="e.g. Cashier"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Role</label>
+                  <input
+                    value={newEmployee.role}
+                    onChange={(e) => setNewEmployee((p) => ({ ...p, role: e.target.value }))}
+                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                    placeholder="e.g. Cashier"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Job Title</label>
+                  <input
+                    value={newEmployee.jobTitle}
+                    onChange={(e) => setNewEmployee((p) => ({ ...p, jobTitle: e.target.value }))}
+                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                    placeholder="e.g. Sales Associate"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-500 mb-1.5">Payroll Type</label>
@@ -526,9 +672,59 @@ export default function EmployeesPage() {
                 </div>
               </div>
               <p className="text-xs text-gray-400">The PIN is used for the Employee Portal where staff can clock in/out and see their hours.</p>
+
+              {/* Permissions Section */}
+              <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={15} className="text-amber-600" />
+                    <span className="text-sm font-bold text-gray-700 dark:text-gray-200">Permissions</span>
+                  </div>
+                  <button
+                    onClick={() => suggestPermissions(newEmployee.jobTitle || newEmployee.role)}
+                    disabled={suggestingPermissions || (!newEmployee.jobTitle.trim() && !newEmployee.role.trim())}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-100 hover:bg-purple-200 text-purple-700 text-xs font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {suggestingPermissions ? (
+                      <><Loader2 size={12} className="animate-spin" /> Thinking…</>
+                    ) : (
+                      <><Sparkles size={12} /> AI Suggest</>
+                    )}
+                  </button>
+                </div>
+
+                {suggestExplanation && (
+                  <div className="mb-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl px-3 py-2.5 text-xs text-purple-700 dark:text-purple-300">
+                    {suggestExplanation}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-2">
+                  {PERMISSION_KEYS.map((key) => {
+                    const enabled = newEmployee.permissions[key];
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setNewEmployee(p => ({
+                          ...p,
+                          permissions: { ...p.permissions, [key]: !p.permissions[key] }
+                        }))}
+                        className={`flex items-center justify-between px-2.5 py-2 rounded-xl border-2 text-xs font-semibold transition-all ${
+                          enabled
+                            ? "border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-600"
+                            : "border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
+                        }`}
+                      >
+                        <span className="truncate">{PERMISSION_LABELS[key]}</span>
+                        <span className="ml-1 flex-shrink-0">{enabled ? "✓" : "✗"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-            <div className="px-6 pb-6 flex gap-3">
-              <button onClick={() => setShowAddEmployee(false)} className="flex-1 border border-gray-300 rounded-xl py-3 text-sm font-semibold text-gray-600">{t.common.cancel}</button>
+            <div className="px-6 pb-6 flex gap-3 flex-shrink-0 border-t border-gray-100 dark:border-gray-700 pt-4">
+              <button onClick={() => { setShowAddEmployee(false); setSuggestExplanation(""); }} className="flex-1 border border-gray-300 rounded-xl py-3 text-sm font-semibold text-gray-600">{t.common.cancel}</button>
               <button onClick={handleAddEmployee} disabled={!newEmployee.name.trim()} className="flex-[2] bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-xl py-3 text-sm transition-colors">{t.common.save}</button>
             </div>
           </div>

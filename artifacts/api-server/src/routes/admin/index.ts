@@ -8,7 +8,7 @@ import { eq, sql, desc } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   users, storeProfiles, products, sales, expenses,
-  employees, shifts, suppliers, analyticsEvents,
+  employees, shifts, suppliers, analyticsEvents, businesses,
 } from "@workspace/db";
 import { requireAdmin } from "../../middlewares/requireAdmin.js";
 import {
@@ -56,9 +56,11 @@ router.get("/stats", async (_req, res) => {
 // ─── List All Stores ──────────────────────────────────────────────────────────
 
 router.get("/stores", async (_req, res) => {
+  // Join from storeProfiles so ALL stores appear regardless of user role
+  // (business_owner users who self-onboarded also have a storeProfile row).
   const rows = await db
     .select({
-      userId:              users.id,
+      userId:              storeProfiles.userId,
       storeName:           storeProfiles.storeName,
       ownerName:           storeProfiles.ownerName,
       businessType:        storeProfiles.businessType,
@@ -73,12 +75,11 @@ router.get("/stores", async (_req, res) => {
       businessId:          users.businessId,
       userCreatedAt:       users.createdAt,
       lastLoginAt:         users.lastLoginAt,
-      profileMissing:      sql<boolean>`${storeProfiles.userId} is null`,
+      profileMissing:      sql<boolean>`false`,
     })
-    .from(users)
-    .leftJoin(storeProfiles, eq(users.id, storeProfiles.userId))
-    .where(eq(users.role, "store_owner"))
-    .orderBy(desc(users.createdAt));
+    .from(storeProfiles)
+    .leftJoin(users, eq(storeProfiles.userId, users.id))
+    .orderBy(desc(storeProfiles.createdAt));
 
   // Attach quick stats per store
   const withStats = await Promise.all(
@@ -273,6 +274,32 @@ router.post("/stores", async (req, res) => {
   });
 });
 
+// ─── Update user account (email, name, phone, role) ─────────────────────────
+
+router.patch("/stores/:userId/user", async (req, res) => {
+  const { userId } = req.params;
+  const { fullName, email, phoneNumber, role } = req.body as Record<string, string | undefined>;
+
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  if (user.role === "superadmin" && role && role !== "superadmin") {
+    return res.status(403).json({ error: "Cannot demote a superadmin here" });
+  }
+
+  const patch: Record<string, unknown> = {};
+  if (fullName?.trim())   patch.fullName    = fullName.trim();
+  if (email?.trim())      patch.email       = email.trim().toLowerCase();
+  if (phoneNumber !== undefined) patch.phoneNumber = phoneNumber?.trim() || null;
+  if (role && ["business_owner", "store_owner"].includes(role)) patch.role = role;
+
+  if (Object.keys(patch).length === 0) {
+    return res.status(400).json({ error: "No valid fields to update" });
+  }
+
+  const [updated] = await db.update(users).set(patch).where(eq(users.id, userId)).returning();
+  return res.json({ user: updated });
+});
+
 // ─── Reset store owner password (one-time plaintext in response — same as create) ─
 
 router.post("/stores/:userId/reset-password", async (req, res) => {
@@ -324,15 +351,76 @@ router.delete("/stores/:userId", async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ─── List all admin users ─────────────────────────────────────────────────────
+// ─── List all users (all roles) ──────────────────────────────────────────────
 
-router.get("/users", async (_req, res) => {
-  const rows = await db.select({
+router.get("/users", async (req, res) => {
+  const { role } = req.query as { role?: string };
+  let query = db.select({
     id: users.id, email: users.email, fullName: users.fullName,
-    role: users.role, emailVerified: users.emailVerified,
+    role: users.role, emailVerified: users.emailVerified, phoneNumber: users.phoneNumber,
+    businessId: users.businessId,
     createdAt: users.createdAt, lastLoginAt: users.lastLoginAt,
-  }).from(users).where(eq(users.role, "superadmin"));
+  }).from(users).$dynamic();
+
+  if (role) query = query.where(eq(users.role, role));
+  const rows = await query.orderBy(desc(users.createdAt));
   res.json(rows);
+});
+
+// ─── Delete cascade preview ───────────────────────────────────────────────────
+
+router.get("/users/:id/cascade", async (req, res) => {
+  const { id } = req.params;
+  const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  if (user.role === "superadmin") {
+    return res.json({ blocked: true, reason: "Cannot delete superadmin accounts" });
+  }
+
+  // For store_owner — their own store profile
+  if (user.role === "store_owner") {
+    const [profile] = await db.select({ storeName: storeProfiles.storeName })
+      .from(storeProfiles).where(eq(storeProfiles.userId, id)).limit(1);
+    const [{ pc }] = await db.select({ pc: sql<number>`count(*)::int` }).from(products).where(eq(products.userId, id));
+    const [{ sc }] = await db.select({ sc: sql<number>`count(*)::int` }).from(sales).where(eq(sales.userId, id));
+    return res.json({
+      blocked: false,
+      stores: profile ? [{ storeName: profile.storeName }] : [],
+      businesses: [],
+      dataSummary: { products: pc, sales: sc },
+    });
+  }
+
+  // For business_owner — find their businesses and all stores within those businesses
+  const ownedBusinesses = await db.select({ id: businesses.id, name: businesses.name })
+    .from(businesses).where(eq(businesses.businessOwnerId, id));
+
+  const businessIds = ownedBusinesses.map(b => b.id);
+  let storeList: { storeName: string; businessName: string }[] = [];
+
+  if (businessIds.length > 0) {
+    const sp = await db.select({ storeName: storeProfiles.storeName, businessId: storeProfiles.businessId })
+      .from(storeProfiles).where(sql`${storeProfiles.businessId} = ANY(${sql.raw(`ARRAY[${businessIds.map(id => `'${id}'`).join(",")}]::uuid[]`)})`)
+    storeList = sp.map(s => ({
+      storeName: s.storeName,
+      businessName: ownedBusinesses.find(b => b.id === s.businessId)?.name ?? "",
+    }));
+  }
+
+  // Also count the business_owner's own store profile if any
+  const [selfProfile] = await db.select({ storeName: storeProfiles.storeName })
+    .from(storeProfiles).where(eq(storeProfiles.userId, id)).limit(1);
+  if (selfProfile) {
+    storeList.push({ storeName: selfProfile.storeName, businessName: "(own account)" });
+  }
+
+  return res.json({
+    blocked: false,
+    businesses: ownedBusinesses.map(b => b.name),
+    stores: storeList,
+    dataSummary: {},
+  });
 });
 
 // ─── Promote/demote user role ─────────────────────────────────────────────────

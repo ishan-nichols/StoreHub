@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import { useApp } from "../contexts/useApp";
 import LowMarginAlerts from "../components/LowMarginAlerts";
+import SmartTipsWidget from "../components/SmartTipsWidget";
+import RealProfitPanel from "../components/RealProfitPanel";
+import VoiceButton from "../components/VoiceButton";
 import { getDashboardSummary, getProducts, API_BASE_URL } from "../services/dataService";
 import type { DashboardSummary } from "../schemas";
 import { formatCurrency, formatDateTime } from "../utils";
@@ -247,6 +250,8 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <RealProfitPanel />
+
       <section className="glass-panel premium-grid relative overflow-hidden rounded-[36px] px-6 py-7 md:px-8 md:py-8">
         <div className="absolute right-0 top-0 h-44 w-44 rounded-full bg-amber-200/40 blur-3xl" />
         <div className="relative grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
@@ -442,6 +447,9 @@ export default function DashboardPage() {
 
       <LowMarginAlerts />
 
+      {/* AI Smart Tips — always shown, self-generating */}
+      <SmartTipsWidget />
+
       {summary.smartTips.length > 0 && (
         <section className="rounded-[32px] bg-amber-50 px-6 py-6 ring-1 ring-amber-200">
           <div className="flex items-center gap-3">
@@ -474,6 +482,8 @@ export default function DashboardPage() {
           </div>
         </section>
       )}
+
+      <VoiceButton />
     </div>
   );
 }

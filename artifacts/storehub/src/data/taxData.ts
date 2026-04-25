@@ -1,7 +1,7 @@
 export type TaxRegion = {
-  code: string;           // "US-TX", "MX-JAL"
-  country: "US" | "MX";
-  stateCode: string;      // "TX", "JAL"
+  code: string;           // "US-TX", "MX-JAL", "CA-ON"
+  country: "US" | "CA" | "MX";
+  stateCode: string;      // "TX", "JAL", "ON"
   stateName: string;
 
   // ── Tax breakdown ──────────────────────────────────────────────────────────
@@ -14,12 +14,33 @@ export type TaxRegion = {
   /** @deprecated use combinedAvgRate — kept for backward compat */
   salesTaxRate: number;       // = combinedAvgRate
 
-  currency: "USD" | "MXN";
-  minimumWageHourly?: number;       // USD/hr for US
+  currency: "USD" | "CAD" | "MXN";
+  minimumWageHourly?: number;       // USD/hr for US, CAD/hr for Canada
   minimumWageDailyMXN?: number;     // MXN/day for Mexico
   incomeTaxNote: string;
   specialNotes: string;
 };
+
+// ─── Canadian Federal Constants ──────────────────────────────────────────────
+
+export const CA_FEDERAL = {
+  gstRate: 0.05,            // GST 5% federal
+  cppRate: 0.0595,          // CPP employee rate 2024
+  cppMax: 68500,            // CPP max pensionable earnings 2024
+  eiRate: 0.0166,           // EI employee rate 2024
+  eiMax: 63200,             // EI max insurable earnings 2024
+  eiEmployerMultiplier: 1.4,// Employer pays 1.4× employee EI
+  standardDeduction: 15705, // Basic personal amount 2024 (CAD)
+  note: "GST/HST filing required if annual revenue > $30,000 CAD. CPP and EI deductions apply to all employees.",
+};
+
+export const CA_BRACKETS_2024 = [
+  { up_to: 55867,    rate: 0.15 },
+  { up_to: 111733,   rate: 0.205 },
+  { up_to: 154906,   rate: 0.26 },
+  { up_to: 220000,   rate: 0.29 },
+  { up_to: Infinity, rate: 0.33 },
+];
 
 export const US_FEDERAL = {
   ficaRate: 0.0765,        // employer portion: 6.2% SS + 1.45% Medicare
@@ -58,6 +79,39 @@ function us(
     salesTaxRate:    combined,    // backward compat
     currency: "USD",
     minimumWageHourly: minWage,
+    incomeTaxNote,
+    specialNotes,
+  };
+}
+
+// ─── Helper to build a CA region ─────────────────────────────────────────────
+function ca(
+  stateCode: string, stateName: string,
+  provincialRate: number,   // provincial portion (PST/QST/HST-provincial)
+  gstIncluded: boolean,     // true = HST (fed+prov combined into stateTaxRate), false = GST separate
+  minWageHourly: number,
+  incomeTaxNote: string,
+  specialNotes: string,
+): TaxRegion {
+  // For HST provinces: stateTaxRate = full HST rate, combinedAvgRate = same
+  // For GST+PST/QST: stateTaxRate = provincial rate, combinedAvgRate = provincial + 5% GST
+  const stateTax  = provincialRate;
+  const combined  = gstIncluded
+    ? provincialRate                          // HST already includes the 5% federal portion
+    : parseFloat((provincialRate + CA_FEDERAL.gstRate).toFixed(5));
+  return {
+    code: `CA-${stateCode}`,
+    country: "CA",
+    stateCode,
+    stateName,
+    stateTaxRate:    stateTax,
+    countyTaxRate:   0,
+    cityTaxRate:     0,
+    combinedAvgRate: combined,
+    combinedMaxRate: combined,
+    salesTaxRate:    combined,   // backward compat
+    currency: "CAD",
+    minimumWageHourly: minWageHourly,
     incomeTaxNote,
     specialNotes,
   };
@@ -183,9 +237,40 @@ export const TAX_REGIONS: TaxRegion[] = [
   mx("ZAC", "Zacatecas",               0.16, 248.93, "ISR federal aplica.", "IVA 16% federal."),
 ];
 
+// ─── Canadian Provinces / Territories ────────────────────────────────────────
+// Columns: stateCode, stateName, provincialRate, gstIncluded(HST?), minWage CAD/hr, income tax note, special notes
+// HST provinces: stateTaxRate = full HST rate (fed+prov combined). gstIncluded=true
+// GST+PST/QST: stateTaxRate = provincial-only rate. gstIncluded=false → combined = prov + 5% GST
+export const CA_REGIONS: TaxRegion[] = [
+  ca("ON", "Ontario",                      0.13,    true,  17.20, "Provincial income tax 5.05–13.16%. Combined with federal brackets.", "HST 13% applies province-wide. No separate PST."),
+  ca("QC", "Quebec",                       0.09975, false, 15.75, "Provincial income tax 14–25.75% (QC). QST 9.975% on most goods.", "GST 5% + QST 9.975% = 14.975% combined. QST registered separately from GST."),
+  ca("BC", "British Columbia",             0.07,    false, 17.40, "Provincial income tax 5.06–20.5%.", "GST 5% + PST 7% = 12% combined. PST registered with BC Ministry of Finance separately."),
+  ca("AB", "Alberta",                      0.0,     false,  15.00, "Provincial income tax 10–15%. Lowest combined rate — no provincial sales tax.", "GST 5% only. Alberta has no provincial sales tax."),
+  ca("MB", "Manitoba",                     0.07,    false, 15.30, "Provincial income tax 10.8–17.4%.", "GST 5% + RST (Retail Sales Tax) 7% = 12% combined."),
+  ca("SK", "Saskatchewan",                 0.06,    false, 14.00, "Provincial income tax 10.5–14.5%.", "GST 5% + PST 6% = 11% combined. PST applies to most goods and some services."),
+  ca("NS", "Nova Scotia",                  0.15,    true,  15.20, "Provincial income tax 8.79–21%. HST 15% is among the highest in Canada.", "HST 15% (5% federal + 10% provincial). No separate PST registration needed."),
+  ca("NB", "New Brunswick",                0.15,    true,  15.30, "Provincial income tax 9.47–19.5%.", "HST 15% (5% federal + 10% provincial)."),
+  ca("NL", "Newfoundland and Labrador",    0.15,    true,  15.60, "Provincial income tax 8.7–21.3%.", "HST 15% (5% federal + 10% provincial)."),
+  ca("PE", "Prince Edward Island",         0.15,    true,  15.00, "Provincial income tax 9.65–18.75%. HST 15% applies.", "HST 15% (5% federal + 10% provincial)."),
+  ca("YT", "Yukon",                        0.0,     false, 17.59, "Territorial income tax 6.4–15%. GST 5% only — no territorial sales tax.", "GST 5% only. Yukon has no territorial sales tax."),
+  ca("NT", "Northwest Territories",        0.0,     false, 16.05, "Territorial income tax 5.9–14.05%. GST 5% only.", "GST 5% only. NWT has no territorial sales tax."),
+  ca("NU", "Nunavut",                      0.0,     false, 16.00, "Territorial income tax 4–11.5%. GST 5% only. Lowest territorial income tax rates.", "GST 5% only. Nunavut has no territorial sales tax."),
+];
+
 export const US_REGIONS  = TAX_REGIONS.filter(r => r.country === "US");
 export const MX_REGIONS  = TAX_REGIONS.filter(r => r.country === "MX");
-export function getRegion(code: string) { return TAX_REGIONS.find(r => r.code === code); }
+
+/** All regions across all supported countries */
+export const ALL_REGIONS: TaxRegion[] = [...TAX_REGIONS, ...CA_REGIONS];
+
+/** Return the regions for a given country code */
+export function getCountryRegions(country: "US" | "CA" | "MX"): TaxRegion[] {
+  if (country === "CA") return CA_REGIONS;
+  if (country === "MX") return MX_REGIONS;
+  return US_REGIONS;
+}
+
+export function getRegion(code: string) { return ALL_REGIONS.find(r => r.code === code); }
 
 /** Format a decimal rate as "X.XX%" — drops trailing zeros after 2dp */
 export function fmtRate(rate: number, decimals = 3): string {

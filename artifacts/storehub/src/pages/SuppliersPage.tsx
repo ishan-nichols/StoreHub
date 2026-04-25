@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useApp } from "../contexts/useApp";
 import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, getProducts } from "../services/dataService";
 import type { Supplier, InsertSupplier, Product } from "../schemas";
-import { Plus, Edit2, Trash2, X, Phone, Mail } from "lucide-react";
+import { Plus, Edit2, Trash2, X, Phone, Mail, Brain } from "lucide-react";
+import SupplierNegotiationPanel from "../components/SupplierNegotiationPanel";
 
 const emptyForm: InsertSupplier = {
   name: "",
@@ -22,6 +23,7 @@ export default function SuppliersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<InsertSupplier>(emptyForm);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"suppliers" | "intelligence">("suppliers");
 
   async function load() {
     const [sups, prods] = await Promise.all([getSuppliers(), getProducts()]);
@@ -81,66 +83,99 @@ export default function SuppliersPage() {
     <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">{t.suppliers.title}</h1>
+        {activeTab === "suppliers" && (
+          <button
+            onClick={openAdd}
+            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl px-4 py-2.5 text-sm font-semibold shadow transition-colors"
+          >
+            <Plus size={16} /> {t.suppliers.addSupplier}
+          </button>
+        )}
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 bg-stone-100 dark:bg-gray-800 rounded-2xl p-1 w-fit">
         <button
-          onClick={openAdd}
-          className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl px-4 py-2.5 text-sm font-semibold shadow transition-colors"
+          onClick={() => setActiveTab("suppliers")}
+          className={`px-5 py-2 rounded-xl text-sm font-semibold transition-colors ${
+            activeTab === "suppliers"
+              ? "bg-white dark:bg-gray-700 text-stone-800 dark:text-gray-100 shadow-sm"
+              : "text-stone-500 dark:text-gray-400 hover:text-stone-700 dark:hover:text-gray-200"
+          }`}
         >
-          <Plus size={16} /> {t.suppliers.addSupplier}
+          Suppliers
+        </button>
+        <button
+          onClick={() => setActiveTab("intelligence")}
+          className={`flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold transition-colors ${
+            activeTab === "intelligence"
+              ? "bg-white dark:bg-gray-700 text-stone-800 dark:text-gray-100 shadow-sm"
+              : "text-stone-500 dark:text-gray-400 hover:text-stone-700 dark:hover:text-gray-200"
+          }`}
+        >
+          <Brain size={14} />
+          Intelligence
         </button>
       </div>
 
-      {loading ? (
-        <div className="text-center text-gray-400 py-12 text-sm">Loading...</div>
-      ) : suppliers.length === 0 ? (
-        <div className="text-center py-16 text-gray-400 text-sm">{t.suppliers.noSuppliers}</div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {suppliers.map((s) => (
-            <div key={s.id} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5 space-y-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="font-bold text-gray-800 dark:text-gray-100">{s.name}</div>
-                  {s.contactName && <div className="text-sm text-gray-500">{s.contactName}</div>}
-                </div>
-                <div className="flex gap-1">
-                  <button onClick={() => openEdit(s)} className="p-2 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors">
-                    <Edit2 size={15} />
-                  </button>
-                  <button onClick={() => setDeleteConfirm(s.id)} className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </div>
-              {s.phone && (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Phone size={13} className="text-gray-400" />
-                  <a href={`tel:${s.phone}`} className="hover:text-amber-600 transition-colors">{s.phone}</a>
-                </div>
-              )}
-              {s.email && (
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Mail size={13} className="text-gray-400" />
-                  <a href={`mailto:${s.email}`} className="hover:text-amber-600 transition-colors">{s.email}</a>
-                </div>
-              )}
-              {s.productIds.length > 0 && (
-                <div>
-                  <div className="text-xs font-semibold text-gray-400 mb-1">Products</div>
-                  <div className="text-xs text-gray-600 dark:text-gray-300">{getProductNames(s.productIds)}</div>
-                </div>
-              )}
-              {s.reorderNotes && (
-                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-2 text-xs text-amber-700 dark:text-amber-300">
-                  {s.reorderNotes}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+      {activeTab === "intelligence" && (
+        <SupplierNegotiationPanel products={products} suppliers={suppliers} />
       )}
 
-      {/* Form Modal */}
-      {showForm && (
+      {activeTab === "suppliers" && (
+        <>
+          {loading ? (
+            <div className="text-center text-gray-400 py-12 text-sm">Loading...</div>
+          ) : suppliers.length === 0 ? (
+            <div className="text-center py-16 text-gray-400 text-sm">{t.suppliers.noSuppliers}</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {suppliers.map((s) => (
+                <div key={s.id} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5 space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="font-bold text-gray-800 dark:text-gray-100">{s.name}</div>
+                      {s.contactName && <div className="text-sm text-gray-500">{s.contactName}</div>}
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={() => openEdit(s)} className="p-2 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors">
+                        <Edit2 size={15} />
+                      </button>
+                      <button onClick={() => setDeleteConfirm(s.id)} className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </div>
+                  {s.phone && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Phone size={13} className="text-gray-400" />
+                      <a href={`tel:${s.phone}`} className="hover:text-amber-600 transition-colors">{s.phone}</a>
+                    </div>
+                  )}
+                  {s.email && (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Mail size={13} className="text-gray-400" />
+                      <a href={`mailto:${s.email}`} className="hover:text-amber-600 transition-colors">{s.email}</a>
+                    </div>
+                  )}
+                  {s.productIds.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-gray-400 mb-1">Products</div>
+                      <div className="text-xs text-gray-600 dark:text-gray-300">{getProductNames(s.productIds)}</div>
+                    </div>
+                  )}
+                  {s.reorderNotes && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-2 text-xs text-amber-700 dark:text-amber-300">
+                      {s.reorderNotes}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Form Modal */}
+          {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
@@ -203,16 +238,18 @@ export default function SuppliersPage() {
         </div>
       )}
 
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-sm w-full space-y-4">
-            <h3 className="font-bold text-gray-800 dark:text-gray-100">Delete this supplier?</h3>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="flex-1 border border-gray-300 rounded-xl py-2.5 text-sm font-semibold text-gray-600">{t.common.cancel}</button>
-              <button onClick={() => handleDelete(deleteConfirm)} className="flex-1 bg-red-500 text-white font-bold rounded-xl py-2.5 text-sm">{t.common.delete}</button>
+          {deleteConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+              <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-2xl max-w-sm w-full space-y-4">
+                <h3 className="font-bold text-gray-800 dark:text-gray-100">Delete this supplier?</h3>
+                <div className="flex gap-3">
+                  <button onClick={() => setDeleteConfirm(null)} className="flex-1 border border-gray-300 rounded-xl py-2.5 text-sm font-semibold text-gray-600">{t.common.cancel}</button>
+                  <button onClick={() => handleDelete(deleteConfirm)} className="flex-1 bg-red-500 text-white font-bold rounded-xl py-2.5 text-sm">{t.common.delete}</button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
+        </>
       )}
     </div>
   );

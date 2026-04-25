@@ -128,6 +128,65 @@ export async function updateStoreProfile(userId: string, patch: Record<string, u
   }
 }
 
+export async function updateStoreUser(
+  userId: string,
+  patch: { fullName?: string; email?: string; phoneNumber?: string; role?: string },
+): Promise<void> {
+  const res = await adminFetch(`/stores/${userId}/user`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error ?? "Update failed");
+  }
+}
+
+export async function resetUserPassword(userId: string, password?: string): Promise<{ tempPassword: string }> {
+  const res = await adminFetch(`/stores/${userId}/reset-password`, {
+    method: "POST",
+    body: JSON.stringify(password ? { password } : {}),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Reset failed");
+  return data;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string | null;
+  fullName: string;
+  role: string;
+  emailVerified: boolean;
+  phoneNumber: string | null;
+  businessId: string | null;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export async function listAllUsers(role?: string): Promise<AdminUser[]> {
+  const url = role ? `/users?role=${encodeURIComponent(role)}` : "/users";
+  const res = await adminFetch(url);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Failed");
+  return data;
+}
+
+export interface DeleteCascade {
+  blocked: boolean;
+  reason?: string;
+  businesses: string[];
+  stores: { storeName: string; businessName: string }[];
+  dataSummary: Record<string, number>;
+}
+
+export async function getDeleteCascade(userId: string): Promise<DeleteCascade> {
+  const res = await adminFetch(`/users/${userId}/cascade`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Failed");
+  return data;
+}
+
 export async function createStore(data: {
   email: string;
   fullName: string;

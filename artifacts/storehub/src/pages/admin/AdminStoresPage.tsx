@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
-import { Search, PlusCircle, Trash2, ExternalLink, AlertCircle } from "lucide-react";
+import { Search, PlusCircle, Trash2, ExternalLink, AlertCircle, LogIn } from "lucide-react";
 import AdminLayout from "./AdminLayout";
 import { listStores, deleteStore, type AdminStore } from "../../services/adminService";
+import { useAuth } from "../../contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -12,6 +13,7 @@ export default function AdminStoresPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const { switchToStore } = useAuth();
 
   useEffect(() => {
     listStores()
@@ -23,9 +25,9 @@ export default function AdminStoresPage() {
   const filtered = stores.filter((s) => {
     const q = query.toLowerCase();
     return (
-      s.storeName.toLowerCase().includes(q) ||
+      (s.storeName ?? "").toLowerCase().includes(q) ||
       (s.email ?? "").toLowerCase().includes(q) ||
-      s.businessType.toLowerCase().includes(q) ||
+      (s.businessType ?? "").toLowerCase().includes(q) ||
       (s.storeCity ?? "").toLowerCase().includes(q)
     );
   });
@@ -136,8 +138,17 @@ export default function AdminStoresPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Enter store"
+                          className="h-7 w-7 text-zinc-400 hover:text-emerald-400"
+                          onClick={() => switchToStore(s.userId, "/dashboard")}
+                        >
+                          <LogIn className="w-3.5 h-3.5" />
+                        </Button>
                         <Link href={`/admin/stores/${s.userId}`}>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-400 hover:text-zinc-100">
+                          <Button variant="ghost" size="icon" title="View details" className="h-7 w-7 text-zinc-400 hover:text-zinc-100">
                             <ExternalLink className="w-3.5 h-3.5" />
                           </Button>
                         </Link>

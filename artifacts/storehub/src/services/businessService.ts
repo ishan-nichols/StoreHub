@@ -1,85 +1,143 @@
+/**
+ * businessService.ts
+ * All API calls for the business-owner section of the app.
+ * Every function is async and throws on non-OK responses.
+ */
+
 import { API_BASE_URL } from "./dataService";
 
-const BASE = `${API_BASE_URL}/api/businesses`;
+// ── Shared fetch helper ───────────────────────────────────────────────────────
 
-async function biz(path: string, options?: RequestInit): Promise<Response> {
-  return fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
+async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
-    ...options,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+    ...init,
   });
 }
 
-export interface BusinessInfo {
-  id: string;
-  name: string;
-  description: string | null;
-  website: string | null;
-  businessOwnerId: string;
-  createdAt: string;
-  updatedAt: string | null;
+async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await apiFetch(path, init);
+  const body = await res.json();
+  if (!res.ok) throw new Error(body?.error ?? `Request failed (${res.status})`);
+  return body as T;
 }
 
-export interface BusinessStore {
-  userId: string;
-  storeName: string;
-  ownerName: string;
-  businessType: string;
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface BusinessInfo {
+  id:              string;
+  name:            string;
+  description:     string | null;
+  website:         string | null;
+  businessOwnerId: string;
+  createdAt:       string;
+  updatedAt:       string;
+}
+
+export interface StoreInfo {
+  userId:              string;
+  storeName:           string;
+  ownerName:           string;
+  businessType:        string;
   onboardingCompleted: boolean;
-  storageMode: string;
-  storeCity: string | null;
-  createdAt: string;
-  lastUpdated: string;
-  revenue: number;
-  productCount: number;
-  employeeCount: number;
+  storageMode:         string;
+  storeCity:           string | null;
+  createdAt:           string;
+  lastUpdated:         string;
+  revenue:             number;
+  productCount:        number;
+  employeeCount:       number;
 }
 
 export interface BusinessStats {
-  totalStores: number;
-  totalRevenue: number;
-  totalProducts: number;
+  totalStores:    number;
+  totalRevenue:   number;
+  totalProducts:  number;
   totalEmployees: number;
-  stores: BusinessStore[];
+  stores:         StoreInfo[];
 }
 
+export interface CreatedStore {
+  userId:       string;
+  email:        string | null;
+  fullName:     string;
+  tempPassword: string | null;
+  selfManaged:  boolean;
+  message:      string;
+}
+
+// ── Business operations ───────────────────────────────────────────────────────
+
+/**
+ * Returns the caller's business, or null if they haven't created one yet.
+ * Never throws a 403 — the backend returns [] for owners with no business.
+ */
 export async function getMyBusiness(): Promise<BusinessInfo | null> {
-  const res = await biz("/");
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Failed to fetch business");
-  const list: BusinessInfo[] = data.businesses ?? [];
-  return list[0] ?? null;
+  const { businesses } = await apiJson<{ businesses: BusinessInfo[] }>(
+    "/api/businesses",
+  );
+  return businesses[0] ?? null;
 }
 
-export async function getBusinessStats(businessId: string): Promise<BusinessStats> {
-  const res = await biz(`/${businessId}/stats`);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Failed to fetch stats");
-  return data;
-}
-
-export async function updateBusiness(
-  businessId: string,
-  patch: { name?: string; description?: string; website?: string }
-): Promise<BusinessInfo> {
-  const res = await biz(`/${businessId}`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Failed to update");
+/**
+ * Create the caller's business during initial onboarding.
+ * The server re-issues JWT cookies and links the businessId to the user record.
+ */
+export async function setupBusiness(name: string): Promise<BusinessInfo> {
+  const data = await apiJson<{ business: BusinessInfo }>(
+    "/api/onboarding/business",
+    {
+      method: "POST",
+      body: JSON.stringify({ businessName: name }),
+    },
+  );
   return data.business;
 }
 
-export async function createStoreUnderBusiness(
+/** Update business name / description / website. */
+export async function updateBusiness(
   businessId: string,
-  payload: { email: string; fullName: string; storeName: string; businessType?: string }
-): Promise<{ userId: string; email: string; fullName: string; tempPassword: string; message: string }> {
-  const res = await biz(`/${businessId}/stores`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "Failed to create store");
-  return data;
+  patch: { name?: string; description?: string; website?: string },
+): Promise<BusinessInfo> {
+  const data = await apiJson<{ business: BusinessInfo }>(
+    `/api/businesses/${businessId}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
+  return data.business;
 }
+
+// ── Store stats ───────────────────────────────────────────────────────────────
+
+/** Full per-store breakdown with aggregated totals. */
+export async function getBusinessStats(businessId: string): Promise<BusinessStats> {
+  return apiJson<BusinessStats>(`/api/businesses/${businessId}/stats`);
+}
+
+// ── Store creation ────────────────────────────────────────────────────────────
+
+export interface CreateStorePayload {
+  storeName:    string;
+  businessType?: string;
+  /** Provide email + fullName only when explicitly assigning a manager. */
+  email?:       string;
+  fullName?:    string;
+  password?:    string;
+}
+
+/** Create a store sub-account under the given business. */
+export async function createStore(
+  businessId: string,
+  payload: CreateStorePayload,
+): Promise<CreatedStore> {
+  return apiJson<CreatedStore>(
+    `/api/businesses/${businessId}/stores`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+// Legacy alias kept so any existing imports don't break.
+export const createStoreUnderBusiness = createStore;
+
+// Re-export type alias used in BusinessStoresPage
+export type BusinessStore = StoreInfo;
