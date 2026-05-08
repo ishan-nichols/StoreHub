@@ -336,6 +336,65 @@ function RetailInventoryPage() {
         </div>
       </section>
 
+      {/* Category Settings Section */}
+      <section className="soft-panel rounded-[32px] p-5">
+        <button
+          onClick={() => setShowCategorySettings(!showCategorySettings)}
+          className="mb-4 flex items-center gap-2 rounded-2xl bg-stone-100 px-4 py-2.5 text-sm font-semibold text-stone-950 transition hover:bg-stone-200"
+        >
+          <Tag size={16} />
+          Stock & Margin Settings {showCategorySettings ? "▼" : "▶"}
+        </button>
+
+        {showCategorySettings && (
+          <div className="space-y-3">
+            {Array.from(new Set(products.map((p) => p.category).filter(Boolean))).map((category) => {
+              const setting = categorySettings.find((s) => s.category === category) || {
+                category,
+                lowStockThreshold: 5,
+                marginTarget: 30,
+              };
+              const isEditing = editingCategorySetting?.category === category;
+              return (
+                <div key={category} className="flex gap-3 items-center rounded-2xl bg-[#fbfaf7] p-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-stone-900">{category || "Uncategorized"}</div>
+                  </div>
+                  <div className="flex gap-3 items-center">
+                    <div className="flex flex-col">
+                      <label className="text-xs text-stone-500 mb-1">Threshold</label>
+                      <input
+                        type="number"
+                        value={isEditing ? editingCategorySetting.lowStockThreshold : setting.lowStockThreshold}
+                        onChange={(e) => {
+                          if (!isEditing) setEditingCategorySetting({...setting});
+                          setEditingCategorySetting((prev) => prev ? {...prev, lowStockThreshold: parseFloat(e.target.value) || 0} : null);
+                        }}
+                        onBlur={() => isEditing && saveCategorySetting()}
+                        className="w-16 rounded px-2 py-1.5 text-sm text-center border border-stone-200 focus:border-amber-400 focus:ring-2 focus:ring-amber-100 outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-xs text-stone-500 mb-1">Target %</label>
+                      <input
+                        type="number"
+                        value={isEditing ? editingCategorySetting.marginTarget : setting.marginTarget}
+                        onChange={(e) => {
+                          if (!isEditing) setEditingCategorySetting({...setting});
+                          setEditingCategorySetting((prev) => prev ? {...prev, marginTarget: parseFloat(e.target.value) || 0} : null);
+                        }}
+                        onBlur={() => isEditing && saveCategorySetting()}
+                        className="w-16 rounded px-2 py-1.5 text-sm text-center border border-stone-200 focus:border-amber-400 focus:ring-2 focus:ring-amber-100 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       <section className="soft-panel overflow-hidden rounded-[32px]">
         {loading ? (
           <div className="px-6 py-16 text-center text-sm text-stone-400">Loading inventory…</div>
@@ -358,45 +417,130 @@ function RetailInventoryPage() {
                 <tr>
                   {selectMode && <th className="px-4 py-4 text-left font-medium">Select</th>}
                   <th className="px-6 py-4 text-left font-medium">Product</th>
-                  <th className="px-4 py-4 text-left font-medium">Category</th>
+                  <th className="px-4 py-4 text-right font-medium">Cost</th>
                   <th className="px-4 py-4 text-right font-medium">Price</th>
-                  <th className="px-4 py-4 text-right font-medium">Quantity</th>
+                  <th className="px-4 py-4 text-center font-medium">Margin %</th>
+                  <th className="px-4 py-4 text-right font-medium">Stock</th>
+                  <th className="px-4 py-4 text-right font-medium">Threshold</th>
                   <th className="px-4 py-4 text-left font-medium">Status</th>
                   <th className="px-6 py-4 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {filtered.map((product) => (
-                  <tr key={product.id} className="bg-white transition hover:bg-[#fcfbf8]">
-                    {selectMode && (
-                      <td className="px-4 py-4">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(product.id)}
-                          onChange={() => toggleSelect(product.id)}
-                          className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
-                        />
+                {filtered.map((product) => {
+                  const margin = marginPct(product);
+                  const target = effectiveMarginTarget(product);
+                  return (
+                    <tr key={product.id} className="bg-white transition hover:bg-[#fcfbf8]">
+                      {selectMode && (
+                        <td className="px-4 py-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(product.id)}
+                            onChange={() => toggleSelect(product.id)}
+                            className="h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                          />
+                        </td>
+                      )}
+                      <td className="px-6 py-4">
+                        <div className="font-medium text-stone-900">{product.name}</div>
+                        <div className="mt-1 text-xs text-stone-400">{product.sku || "No SKU"}</div>
                       </td>
-                    )}
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-stone-900">{product.name}</div>
-                      <div className="mt-1 text-xs text-stone-400">{product.sku || "No SKU"}</div>
-                    </td>
-                    <td className="px-4 py-4 text-stone-500">{product.category || "—"}</td>
-                    <td className="px-4 py-4 text-right font-semibold text-stone-900">{formatCurrency(product.price, currencySymbol)}</td>
-                    <td className="px-4 py-4 text-right">
-                      <span className={`font-semibold ${product.quantity <= product.lowStockThreshold ? "text-rose-600" : "text-stone-900"}`}>{product.quantity}</span>
-                      <span className="ml-1 text-xs text-stone-400">{product.unit}</span>
-                    </td>
-                    <td className="px-4 py-4">{statusBadge(product)}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex justify-end gap-2">
-                        <IconButton icon={<Edit2 size={15} />} label="Edit product" onClick={() => openEdit(product)} />
-                        <IconButton icon={<Trash2 size={15} />} label="Delete product" onClick={() => setDeleteConfirm(product.id)} danger />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      <td className="px-4 py-4 text-right">
+                        {inlineEdit?.productId === product.id && inlineEdit.field === "costPrice" ? (
+                          <input
+                            autoFocus
+                            type="number"
+                            value={inlineEdit.value}
+                            onChange={(e) => setInlineEdit({...inlineEdit, value: e.target.value})}
+                            onBlur={commitInlineEdit}
+                            onKeyDown={(e) => e.key === "Enter" && commitInlineEdit()}
+                            className="w-20 rounded border border-amber-400 px-2 py-1 text-sm text-right outline-none"
+                          />
+                        ) : (
+                          <span
+                            onClick={() => setInlineEdit({productId: product.id, field: "costPrice", value: String(product.costPrice || 0)})}
+                            className={`cursor-pointer rounded px-2 py-1 transition hover:bg-amber-50 ${!product.costPrice ? "font-medium text-amber-600" : "text-stone-900"}`}
+                          >
+                            {product.costPrice ? formatCurrency(product.costPrice, currencySymbol) : "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        {inlineEdit?.productId === product.id && inlineEdit.field === "price" ? (
+                          <input
+                            autoFocus
+                            type="number"
+                            value={inlineEdit.value}
+                            onChange={(e) => setInlineEdit({...inlineEdit, value: e.target.value})}
+                            onBlur={commitInlineEdit}
+                            onKeyDown={(e) => e.key === "Enter" && commitInlineEdit()}
+                            className="w-20 rounded border border-amber-400 px-2 py-1 text-sm text-right outline-none"
+                          />
+                        ) : (
+                          <span
+                            onClick={() => setInlineEdit({productId: product.id, field: "price", value: String(product.price)})}
+                            className="cursor-pointer rounded px-2 py-1 font-semibold text-stone-900 transition hover:bg-amber-50"
+                          >
+                            {formatCurrency(product.price, currencySymbol)}
+                          </span>
+                        )}
+                      </td>
+                      <td className={`px-4 py-4 text-center`}>
+                        <span className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${marginColor(margin, target)}`}>
+                          {margin !== null ? `${margin.toFixed(1)}%` : "No cost"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        {inlineEdit?.productId === product.id && inlineEdit.field === "quantity" ? (
+                          <input
+                            autoFocus
+                            type="number"
+                            value={inlineEdit.value}
+                            onChange={(e) => setInlineEdit({...inlineEdit, value: e.target.value})}
+                            onBlur={commitInlineEdit}
+                            onKeyDown={(e) => e.key === "Enter" && commitInlineEdit()}
+                            className="w-16 rounded border border-amber-400 px-2 py-1 text-sm text-right outline-none"
+                          />
+                        ) : (
+                          <span
+                            onClick={() => setInlineEdit({productId: product.id, field: "quantity", value: String(product.quantity)})}
+                            className={`cursor-pointer rounded px-2 py-1 transition hover:bg-amber-50 ${product.quantity <= product.lowStockThreshold ? "font-semibold text-rose-600" : "text-stone-900"}`}
+                          >
+                            {product.quantity} {product.unit}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        {inlineEdit?.productId === product.id && inlineEdit.field === "lowStockThreshold" ? (
+                          <input
+                            autoFocus
+                            type="number"
+                            value={inlineEdit.value}
+                            onChange={(e) => setInlineEdit({...inlineEdit, value: e.target.value})}
+                            onBlur={commitInlineEdit}
+                            onKeyDown={(e) => e.key === "Enter" && commitInlineEdit()}
+                            className="w-16 rounded border border-amber-400 px-2 py-1 text-sm text-right outline-none"
+                          />
+                        ) : (
+                          <span
+                            onClick={() => setInlineEdit({productId: product.id, field: "lowStockThreshold", value: String(product.lowStockThreshold)})}
+                            className="cursor-pointer rounded px-2 py-1 text-stone-900 transition hover:bg-amber-50"
+                          >
+                            {product.lowStockThreshold}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4">{statusBadge(product)}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex justify-end gap-2">
+                          <IconButton icon={<Edit2 size={15} />} label="Edit product" onClick={() => openEdit(product)} />
+                          <IconButton icon={<Trash2 size={15} />} label="Delete product" onClick={() => setDeleteConfirm(product.id)} danger />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
