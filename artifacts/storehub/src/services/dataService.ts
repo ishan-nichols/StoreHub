@@ -37,6 +37,7 @@ import type {
   DailyPayRecord,
   InsertDailyPayRecord,
   PayrollReportEntry,
+  CategorySetting,
 } from "../schemas";
 import { generateId, generateReceiptNumber, now, isToday, getDayName } from "../utils";
 
@@ -916,4 +917,25 @@ export async function getTaxSummary(): Promise<{
     currentMonth: { totalSales: monthSales, taxCollected: monthSales * taxRate, totalExpenses: monthExpenses },
     ytd: { totalSales: ytdSales, taxCollected: ytdSales * taxRate, totalExpenses: ytdExpenses },
   };
+}
+
+// ─── Category Settings (Threshold & Margin Targets) ────────────────────────────
+
+const CATEGORY_SETTINGS_KEY = "storehub_category_settings";
+
+export async function getCategorySettings(): Promise<CategorySetting[]> {
+  await Promise.resolve();
+  return getItem<CategorySetting>(CATEGORY_SETTINGS_KEY);
+}
+
+export async function upsertCategorySetting(setting: CategorySetting): Promise<void> {
+  await Promise.resolve();
+  const settings = getItem<CategorySetting>(CATEGORY_SETTINGS_KEY);
+  const idx = settings.findIndex((s) => s.category === setting.category);
+  if (idx >= 0) {
+    settings[idx] = setting;
+  } else {
+    settings.push(setting);
+  }
+  setItem(CATEGORY_SETTINGS_KEY, settings);
 }

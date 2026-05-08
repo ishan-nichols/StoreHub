@@ -13,6 +13,7 @@ export interface ProfitBreakdown {
   period: "today" | "week" | "month" | "year";
   startDate: string;
   endDate: string;
+  missingCostProducts: { id: string; name: string }[];
 }
 
 export interface ProfitByProduct {
@@ -99,16 +100,19 @@ export function calculateProfitBreakdown(
 
   let revenue = 0;
   let cogs = 0;
+  const missingCostProductIds = new Set<string>();
 
   for (const sale of periodSales) {
     revenue += sale.total;
     for (const item of sale.items) {
       // Find product first by id, then by name
       const product = productById.get(item.productId) ?? productByName.get(item.productName.toLowerCase());
-      const cost = product?.costPrice != null
-        ? product.costPrice
-        : item.price * 0.6;  // fallback: 60% of sell price
-      cogs += cost * item.quantity;
+      if (product?.costPrice != null) {
+        cogs += product.costPrice * item.quantity;
+      } else {
+        // Track missing cost instead of guessing
+        if (product?.id) missingCostProductIds.add(product.id);
+      }
     }
   }
 
@@ -146,6 +150,12 @@ export function calculateProfitBreakdown(
 
   const realProfit = grossProfit - expenseTotal - laborCost - estimatedTax;
 
+  const missingCostProducts = Array.from(missingCostProductIds)
+    .map(id => {
+      const product = productById.get(id);
+      return { id, name: product?.name ?? "Unknown" };
+    });
+
   return {
     revenue,
     cogs,
@@ -157,6 +167,7 @@ export function calculateProfitBreakdown(
     period,
     startDate: dateToYMD(start),
     endDate: dateToYMD(end),
+    missingCostProducts,
   };
 }
 
@@ -185,7 +196,7 @@ export function getProfitByProduct(sales: Sale[], products: Product[]): ProfitBy
       const existing = map.get(key);
 
       const itemRevenue = item.price * item.quantity;
-      const cost = product?.costPrice != null ? product.costPrice : item.price * 0.6;
+      const cost = product?.costPrice ?? 0;
       const itemCogs = cost * item.quantity;
 
       if (existing) {
@@ -244,7 +255,7 @@ export function getProfitTrend(sales: Sale[], products: Product[], days: 30 | 90
     entry.revenue += sale.total;
     for (const item of sale.items) {
       const product = productById.get(item.productId) ?? productByName.get(item.productName.toLowerCase());
-      const cost = product?.costPrice != null ? product.costPrice : item.price * 0.6;
+      const cost = product?.costPrice ?? 0;
       entry.cogs += cost * item.quantity;
     }
   }

@@ -351,6 +351,22 @@ export default function RealProfitPanel() {
         </div>
       )}
 
+      {/* Missing Cost Alert */}
+      {breakdown && breakdown.missingCostProducts.length > 0 && (
+        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="font-semibold">⚠ Missing cost data</div>
+          <div className="mt-1 text-xs text-amber-800">
+            {breakdown.missingCostProducts.length} product{breakdown.missingCostProducts.length === 1 ? "" : "s"} have no cost price set, so profit is understated.
+            <span className="ml-2 font-medium underline cursor-pointer hover:text-amber-950" onClick={() => window.location.href = "/inventory"}>
+              Fix in Inventory →
+            </span>
+          </div>
+          <div className="mt-2 text-xs text-amber-700">
+            {breakdown.missingCostProducts.map(p => p.name).join(", ")}
+          </div>
+        </div>
+      )}
+
       {/* Waterfall Breakdown */}
       {breakdown && (
         <div className="mt-5 space-y-1">

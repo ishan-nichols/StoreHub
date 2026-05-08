@@ -10,8 +10,8 @@ import ScheduledPriceChangesPanel from "../components/ScheduledPriceChangesPanel
 import PredictedDemandPanel from "../components/PredictedDemandPanel";
 import DeadStockPanel from "../components/DeadStockPanel";
 import { saveToLibrary, type BarcodeProductInfo } from "../services/barcodeService";
-import { createProduct, deleteProduct, getProducts, getSuppliers, updateProduct } from "../services/dataService";
-import type { InsertProduct, Product, Supplier } from "../schemas";
+import { createProduct, deleteProduct, getProducts, getSuppliers, updateProduct, getCategorySettings, upsertCategorySetting } from "../services/dataService";
+import type { InsertProduct, Product, Supplier, CategorySetting } from "../schemas";
 import { formatCurrency } from "../utils";
 import IngredientsPage from "./IngredientsPage";
 import RecipesPage from "./RecipesPage";
@@ -95,6 +95,10 @@ function RetailInventoryPage() {
   const [showBulkUpdate, setShowBulkUpdate] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
+  const [inlineEdit, setInlineEdit] = useState<{ productId: string; field: "price" | "costPrice" | "quantity" | "lowStockThreshold" | "marginTarget"; value: string } | null>(null);
+  const [categorySettings, setCategorySettings] = useState<CategorySetting[]>([]);
+  const [showCategorySettings, setShowCategorySettings] = useState(false);
+  const [editingCategorySetting, setEditingCategorySetting] = useState<CategorySetting | null>(null);
 
   const retailTabs: { id: RetailTab; label: string }[] = [
     { id: "products",     label: "Products" },
@@ -103,9 +107,10 @@ function RetailInventoryPage() {
   ];
 
   async function load() {
-    const [productList, supplierList] = await Promise.all([getProducts(), getSuppliers()]);
+    const [productList, supplierList, settings] = await Promise.all([getProducts(), getSuppliers(), getCategorySettings()]);
     setProducts(productList);
     setSuppliers(supplierList);
+    setCategorySettings(settings);
     setLoading(false);
   }
 
@@ -114,6 +119,39 @@ function RetailInventoryPage() {
     window.addEventListener("storehub:products-updated", load);
     return () => window.removeEventListener("storehub:products-updated", load);
   }, []);
+
+  function marginPct(product: Product): number | null {
+    if (!product.costPrice) return null;
+    return ((product.price - product.costPrice) / product.price) * 100;
+  }
+
+  function effectiveMarginTarget(product: Product): number {
+    if (product.marginTarget != null) return product.marginTarget;
+    return categorySettings.find(s => s.category === product.category)?.marginTarget ?? 30;
+  }
+
+  function marginColor(margin: number | null, target: number): string {
+    if (margin === null) return "bg-amber-100 text-amber-800";
+    if (margin >= target) return "bg-emerald-100 text-emerald-800";
+    if (margin >= target - 5) return "bg-amber-100 text-amber-800";
+    return "bg-rose-100 text-rose-800";
+  }
+
+  async function commitInlineEdit() {
+    if (!inlineEdit) return;
+    const num = parseFloat(inlineEdit.value);
+    if (isNaN(num) || num < 0) { setInlineEdit(null); return; }
+    await updateProduct(inlineEdit.productId, { [inlineEdit.field]: num });
+    await load();
+    setInlineEdit(null);
+  }
+
+  async function saveCategorySetting() {
+    if (!editingCategorySetting) return;
+    await upsertCategorySetting(editingCategorySetting);
+    await load();
+    setEditingCategorySetting(null);
+  }
 
   const filtered = useMemo(
     () =>

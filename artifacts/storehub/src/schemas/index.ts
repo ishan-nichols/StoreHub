@@ -163,11 +163,18 @@ export interface Product {
   costPrice?: number;
   srp?: number;
   marginAlertPct?: number;
+  marginTarget?: number;
   priceHistory?: PriceHistoryEntry[];
   posSyncStatus?: PosSyncStatus;
   posSyncError?: string;
   lastCostChangeAt?: string;
   lastPriceChangeAt?: string;
+}
+
+export interface CategorySetting {
+  category: string;
+  lowStockThreshold: number;
+  marginTarget: number;
 }
 
 export interface ScheduledPriceChange {
