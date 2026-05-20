@@ -48,6 +48,13 @@ Thumbs.db
 .cache/
 .local/
 
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+*/.env
+*/.env.local
+
 # Local logs and dev runtime
 api-server.log
 api-server-err.log
