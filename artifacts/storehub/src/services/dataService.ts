@@ -1,17 +1,9 @@
 /**
  * dataService.ts — Single data access layer for StoreHub.
  *
- * All data operations go through this file. Currently reads/writes to
- * localStorage. To switch to a real API, replace the implementations
- * of each function here — no changes needed in UI components.
- *
- * All functions are async/await so they are structurally ready for
- * real API endpoints.
- *
- * Future integration points:
- * - Shopify: Replace product/inventory functions with Shopify Products API
- * - Square: Replace POS/sales functions with Square Payments API
- * - QuickBooks: Replace expense/profit functions with QuickBooks Accounting API
+ * Primary storage: PostgreSQL via /api/storehub/* backend routes.
+ * Fallback (reads): localStorage when API is unreachable.
+ * On first load: automatically migrates any existing localStorage data to the DB.
  */
 
 import type {
@@ -38,26 +30,47 @@ import type {
   InsertDailyPayRecord,
   PayrollReportEntry,
   CategorySetting,
+  CashShift,
+  InsertCashShift,
+  Refund,
+  InsertRefund,
+  MonthCloseRecord,
 } from "../schemas";
 import { generateId, generateReceiptNumber, now, isToday, getDayName } from "../utils";
 
+export type { Employee, InsertEmployee } from "../schemas";
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+// ─── localStorage helpers (fallback + non-API types) ──────────────────────────
+
+const ACTIVE_STORE_KEY = "sh_active_store_id";
 
 const KEYS = {
   USER_PROFILE: "storehub_user_profile",
   PRODUCTS: "storehub_products",
   SALES: "storehub_sales",
+  REFUNDS: "storehub_refunds",
   EXPENSES: "storehub_expenses",
   SUPPLIERS: "storehub_suppliers",
   EMPLOYEES: "storehub_employees",
   SHIFTS: "storehub_shifts",
   RECURRING_EXPENSES: "storehub_recurring_expenses",
   SCHEDULED_PRICES: "storehub_scheduled_prices",
+  MONTH_CLOSE_RECORDS: "storehub_month_close_records",
 };
+
+const STORE_SCOPED_KEYS = new Set(Object.values(KEYS));
+
+function getScopedKey(key: string): string {
+  const activeStoreId = typeof window !== "undefined" ? sessionStorage.getItem(ACTIVE_STORE_KEY) : null;
+  if (!activeStoreId || !STORE_SCOPED_KEYS.has(key)) return key;
+  return `${key}_${activeStoreId}`;
+}
 
 function getItem<T>(key: string): T[] {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(getScopedKey(key));
     return raw ? (JSON.parse(raw) as T[]) : [];
   } catch {
     return [];
@@ -65,12 +78,14 @@ function getItem<T>(key: string): T[] {
 }
 
 function setItem<T>(key: string, data: T[]): void {
-  localStorage.setItem(key, JSON.stringify(data));
+  try {
+    localStorage.setItem(getScopedKey(key), JSON.stringify(data));
+  } catch { /* quota exceeded — ignore */ }
 }
 
 function getSingle<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(getScopedKey(key));
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -78,36 +93,162 @@ function getSingle<T>(key: string): T | null {
 }
 
 function setSingle<T>(key: string, data: T): void {
-  localStorage.setItem(key, JSON.stringify(data));
+  localStorage.setItem(getScopedKey(key), JSON.stringify(data));
+}
+
+function removeScopedItem(key: string): void {
+  localStorage.removeItem(getScopedKey(key));
+}
+
+// ─── API helpers ──────────────────────────────────────────────────────────────
+
+async function api<T>(path: string, opts?: RequestInit): Promise<T> {
+  const activeStoreId = typeof window !== "undefined" ? sessionStorage.getItem("sh_active_store_id") : null;
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
+    cache: "no-store",
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(activeStoreId ? { "X-Store-User-Id": activeStoreId } : {}),
+      ...opts?.headers,
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`[API] ${opts?.method ?? "GET"} ${path} → ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+function apiGet<T>(path: string) {
+  return api<T[]>(`${path}?limit=200`);
+}
+
+function apiPost<T>(path: string, body: unknown) {
+  return api<T>(path, { method: "POST", body: JSON.stringify(body) });
+}
+
+function apiPatch<T>(path: string, body: unknown) {
+  return api<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+function apiDelete(path: string) {
+  return api<{ ok: boolean }>(path, { method: "DELETE" });
+}
+
+// ─── One-time localStorage → DB migration ────────────────────────────────────
+
+const MIGRATED_FLAG = "sh_ls_migrated_v3";
+let migrationRan = false;
+
+async function ensureMigrated(): Promise<void> {
+  if (migrationRan) return;
+  migrationRan = true;
+  if (localStorage.getItem(MIGRATED_FLAG)) return;
+
+  // In cloud/store-view mode the server is the source of truth; pullAll handles
+  // the server→local cache. Never push localStorage back to the server here —
+  // it would duplicate records that pullAll just wrote to localStorage.
+  const isStoreView = !!sessionStorage.getItem(ACTIVE_STORE_KEY);
+  const cloudMode = localStorage.getItem("storehub_storage_mode") === "cloud";
+  if (isStoreView || cloudMode) {
+    localStorage.setItem(MIGRATED_FLAG, "1");
+    return;
+  }
+
+  // Gather all localStorage collections
+  const lsProducts   = getItem<Product>(KEYS.PRODUCTS);
+  const lsSales      = getItem<Sale>(KEYS.SALES);
+  const lsExpenses   = getItem<Expense>(KEYS.EXPENSES);
+  const lsSuppliers  = getItem<Supplier>(KEYS.SUPPLIERS);
+  const lsEmployees  = getItem<Employee>(KEYS.EMPLOYEES);
+  const lsShifts     = getItem<Shift>(KEYS.SHIFTS);
+  const lsRecurring  = getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES);
+  const lsScheduled  = getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES);
+  const lsDailyPay   = getItem<DailyPayRecord>("storehub_daily_pay_records");
+  const lsProfile    = getSingle<UserProfile>(KEYS.USER_PROFILE);
+
+  const hasData =
+    lsProducts.length > 0 || lsSales.length > 0 || lsExpenses.length > 0 ||
+    lsSuppliers.length > 0 || lsEmployees.length > 0;
+
+  if (!hasData) {
+    localStorage.setItem(MIGRATED_FLAG, "1");
+    return;
+  }
+
+  try {
+    await apiPost("/api/storehub/migrate", {
+      ...(lsProfile ? { profile: lsProfile } : {}),
+      products:              lsProducts,
+      sales:                 lsSales,
+      expenses:              lsExpenses,
+      suppliers:             lsSuppliers,
+      employees:             lsEmployees,
+      shifts:                lsShifts,
+      recurringExpenses:     lsRecurring,
+      scheduledPriceChanges: lsScheduled,
+    });
+    // Daily pay records via individual POSTs (no bulk migrate endpoint)
+    for (const r of lsDailyPay) {
+      await apiPost("/api/storehub/daily-pay-records", r).catch(() => {});
+    }
+    localStorage.setItem(MIGRATED_FLAG, "1");
+    console.info(`[dataService] Migrated ${lsProducts.length} products, ${lsSales.length} sales, ${lsExpenses.length} expenses to cloud DB`);
+  } catch (e) {
+    console.warn("[dataService] Migration to cloud failed, will retry next session:", e);
+    migrationRan = false; // allow retry
+  }
 }
 
 // ─── User Profile ──────────────────────────────────────────────────────────────
 
 export async function getUserProfile(): Promise<UserProfile | null> {
-  // Future: GET /api/profile
-  await Promise.resolve();
-  return getSingle<UserProfile>(KEYS.USER_PROFILE);
+  const local = getSingle<UserProfile>(KEYS.USER_PROFILE);
+  if (local) return local;
+
+  // localStorage is empty — try to restore from the backend storeProfiles table
+  try {
+    const remote = await api<UserProfile | null>("/api/storehub/profile");
+    if (remote && remote.storeName) {
+      // Re-hydrate localStorage so subsequent reads are fast
+      setSingle(KEYS.USER_PROFILE, remote);
+      return remote;
+    }
+  } catch {
+    // Not authenticated or network issue — return null gracefully
+  }
+  return null;
 }
 
 export async function saveUserProfile(profile: UserProfile): Promise<UserProfile> {
-  // Future: POST/PUT /api/profile
   await Promise.resolve();
   setSingle(KEYS.USER_PROFILE, profile);
   return profile;
 }
 
 export async function updateUserProfile(updates: Partial<UserProfile>): Promise<UserProfile | null> {
-  // Future: PATCH /api/profile
-  await Promise.resolve();
   const current = getSingle<UserProfile>(KEYS.USER_PROFILE);
   if (!current) return null;
   const updated = { ...current, ...updates };
   setSingle(KEYS.USER_PROFILE, updated);
+  // Persist to server so portal and other endpoints see the latest values.
+  try {
+    await fetch(`${API_BASE_URL}/api/storehub/profile`, {
+      method: "PUT",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updated),
+    });
+  } catch {
+    // Non-fatal — localStorage already updated, server will sync on next migration.
+  }
   return updated;
 }
 
 export async function trackFeatureUsage(feature: string): Promise<void> {
-  // Future: POST /api/profile/feature-usage
   await Promise.resolve();
   const current = getSingle<UserProfile>(KEYS.USER_PROFILE);
   if (!current) return;
@@ -117,95 +258,99 @@ export async function trackFeatureUsage(feature: string): Promise<void> {
 }
 
 export async function clearAllData(): Promise<void> {
-  // Future: DELETE /api/data
   await Promise.resolve();
-  Object.values(KEYS).forEach((k) => localStorage.removeItem(k));
+  Object.values(KEYS).forEach((k) => removeScopedItem(k));
 }
 
 // ─── Products / Inventory ──────────────────────────────────────────────────────
 
 export async function getProducts(): Promise<Product[]> {
-  // Future: GET /api/products
-  // [Shopify integration point: replace with Shopify.products.list()]
-  await Promise.resolve();
-  return getItem<Product>(KEYS.PRODUCTS);
+  await ensureMigrated();
+  try {
+    return await apiGet<Product>("/api/storehub/products");
+  } catch (e) {
+    console.warn("[dataService] getProducts API failed, using localStorage fallback:", e);
+    return getItem<Product>(KEYS.PRODUCTS);
+  }
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
-  // Future: GET /api/products/:id
-  await Promise.resolve();
-  const products = getItem<Product>(KEYS.PRODUCTS);
+  const products = await getProducts();
   return products.find((p) => p.id === id) ?? null;
 }
 
 export async function createProduct(data: InsertProduct): Promise<Product> {
-  // Future: POST /api/products
-  // [Shopify integration point: replace with Shopify.products.create()]
-  await Promise.resolve();
-  const product: Product = {
-    ...data,
-    id: generateId(),
-    createdAt: now(),
-    updatedAt: now(),
-  };
-  const products = getItem<Product>(KEYS.PRODUCTS);
-  setItem(KEYS.PRODUCTS, [...products, product]);
-  return product;
+  await ensureMigrated();
+  try {
+    const product = await apiPost<Product>("/api/storehub/products", data);
+    window.dispatchEvent(new CustomEvent("storehub:products-updated"));
+    return product;
+  } catch (e) {
+    console.warn("[dataService] createProduct API failed, saving locally:", e);
+    const product: Product = { ...data, id: generateId(), createdAt: now(), updatedAt: now() };
+    const products = getItem<Product>(KEYS.PRODUCTS);
+    setItem(KEYS.PRODUCTS, [...products, product]);
+    window.dispatchEvent(new CustomEvent("storehub:products-updated"));
+    return product;
+  }
 }
 
 export async function updateProduct(id: string, data: Partial<InsertProduct>): Promise<Product | null> {
-  // Future: PATCH /api/products/:id
-  // [Shopify integration point: replace with Shopify.products.update()]
-  await Promise.resolve();
-  const products = getItem<Product>(KEYS.PRODUCTS);
-  const idx = products.findIndex((p) => p.id === id);
-  if (idx === -1) return null;
-  const updated = { ...products[idx], ...data, updatedAt: now() };
-  products[idx] = updated;
-  setItem(KEYS.PRODUCTS, products);
-  return updated;
+  await ensureMigrated();
+  try {
+    const product = await apiPatch<Product>(`/api/storehub/products/${id}`, data);
+    window.dispatchEvent(new CustomEvent("storehub:products-updated"));
+    return product;
+  } catch (e) {
+    console.warn("[dataService] updateProduct API failed, updating locally:", e);
+    const products = getItem<Product>(KEYS.PRODUCTS);
+    const idx = products.findIndex((p) => p.id === id);
+    if (idx === -1) throw e; // product isn't in localStorage either — propagate so callers can show an error
+    const updated = { ...products[idx], ...data, updatedAt: now() };
+    products[idx] = updated;
+    setItem(KEYS.PRODUCTS, products);
+    window.dispatchEvent(new CustomEvent("storehub:products-updated"));
+    return updated;
+  }
 }
 
 export async function deleteProduct(id: string): Promise<boolean> {
-  // Future: DELETE /api/products/:id
-  await Promise.resolve();
-  const products = getItem<Product>(KEYS.PRODUCTS);
-  const filtered = products.filter((p) => p.id !== id);
-  setItem(KEYS.PRODUCTS, filtered);
-  return true;
+  await ensureMigrated();
+  try {
+    await apiDelete(`/api/storehub/products/${id}`);
+    window.dispatchEvent(new CustomEvent("storehub:products-updated"));
+    return true;
+  } catch (e) {
+    console.warn("[dataService] deleteProduct API failed, deleting locally:", e);
+    const products = getItem<Product>(KEYS.PRODUCTS);
+    setItem(KEYS.PRODUCTS, products.filter((p) => p.id !== id));
+    window.dispatchEvent(new CustomEvent("storehub:products-updated"));
+    return true;
+  }
 }
 
 export async function getLowStockProducts(): Promise<Product[]> {
-  // Future: GET /api/products/low-stock
-  await Promise.resolve();
-  const products = getItem<Product>(KEYS.PRODUCTS);
+  const products = await getProducts();
   return products.filter((p) => p.quantity <= p.lowStockThreshold);
 }
 
 // ─── Pre-seeding ────────────────────────────────────────────────────────────────
 
 export async function bulkCreateProducts(items: InsertProduct[]): Promise<Product[]> {
-  await Promise.resolve();
-  const created: Product[] = items.map((data) => ({
-    ...data,
-    id: generateId(),
-    createdAt: now(),
-    updatedAt: now(),
-  }));
-  const existing = getItem<Product>(KEYS.PRODUCTS);
-  setItem(KEYS.PRODUCTS, [...existing, ...created]);
+  await ensureMigrated();
+  const created: Product[] = [];
+  for (const data of items) {
+    created.push(await createProduct(data));
+  }
   return created;
 }
 
 export async function bulkCreateEmployees(items: InsertEmployee[]): Promise<Employee[]> {
-  await Promise.resolve();
-  const created: Employee[] = items.map((data) => ({
-    ...data,
-    id: generateId(),
-    createdAt: now(),
-  }));
-  const existing = getItem<Employee>(KEYS.EMPLOYEES);
-  setItem(KEYS.EMPLOYEES, [...existing, ...created]);
+  await ensureMigrated();
+  const created: Employee[] = [];
+  for (const data of items) {
+    created.push(await createEmployee(data));
+  }
   return created;
 }
 
@@ -304,40 +449,69 @@ export function getSeedProducts(businessType: BusinessType, currencyMultiplier =
 // ─── Sales ─────────────────────────────────────────────────────────────────────
 
 export async function getSales(): Promise<Sale[]> {
-  // Future: GET /api/sales
-  // [Square integration point: replace with Square.ordersApi.listOrders()]
-  await Promise.resolve();
-  const sales = getItem<Sale>(KEYS.SALES);
-  return sales.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  await ensureMigrated();
+  try {
+    const rows = await apiGet<Sale>("/api/storehub/sales");
+    // API returns newest first (orderBy createdAt desc) — keep that order
+    return rows;
+  } catch (e) {
+    console.warn("[dataService] getSales API failed, using localStorage fallback:", e);
+    return getItem<Sale>(KEYS.SALES).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
 }
 
 export async function getSale(id: string): Promise<Sale | null> {
-  // Future: GET /api/sales/:id
-  await Promise.resolve();
-  const sales = getItem<Sale>(KEYS.SALES);
+  const sales = await getSales();
   return sales.find((s) => s.id === id) ?? null;
 }
 
 export async function createSale(data: InsertSale): Promise<Sale> {
-  // Future: POST /api/sales
-  // [Square integration point: replace with Square.ordersApi.createOrder()]
-  await Promise.resolve();
-  const sale: Sale = {
-    ...data,
-    id: generateId(),
-    receiptNumber: generateReceiptNumber(),
-    createdAt: now(),
-  };
-  const sales = getItem<Sale>(KEYS.SALES);
-  setItem(KEYS.SALES, [...sales, sale]);
+  await ensureMigrated();
+  let sale: Sale;
 
+  try {
+    sale = await apiPost<Sale>("/api/storehub/sales", {
+      items:         data.items,
+      subtotal:      data.subtotal,
+      tax:           data.tax,
+      total:         data.total,
+      amountPaid:    data.amountPaid,
+      change:        data.change,
+      receiptNumber: data.receiptNumber ?? generateReceiptNumber(),
+      note:          data.note,
+      customerId:    data.customerId,
+      customerPhone: data.customerPhone,
+      paymentMethod: data.paymentMethod,
+      loyaltyPointsUsed: data.loyaltyPointsUsed,
+    });
+  } catch (e) {
+    console.warn("[dataService] createSale API failed, saving locally:", e);
+    sale = {
+      ...data,
+      id: generateId(),
+      receiptNumber: data.receiptNumber ?? generateReceiptNumber(),
+      createdAt: now(),
+    };
+    // Emergency local persist so the receipt is never lost
+    const existing = getItem<Sale>(KEYS.SALES);
+    if (!existing.some((s) => s.id === sale.id)) {
+      setItem(KEYS.SALES, [...existing, sale]);
+    }
+  }
+
+  // Deduct product quantities via API (best-effort)
   for (const item of data.items) {
-    const products = getItem<Product>(KEYS.PRODUCTS);
-    const idx = products.findIndex((p) => p.id === item.productId);
-    if (idx !== -1) {
-      products[idx].quantity = Math.max(0, products[idx].quantity - item.quantity);
-      products[idx].updatedAt = now();
-      setItem(KEYS.PRODUCTS, products);
+    try {
+      const product = await getProduct(item.productId);
+      if (product) {
+        await updateProduct(item.productId, {
+          quantity: Math.max(0, product.quantity - item.quantity),
+        });
+      }
+    } catch {
+      // Non-fatal: quantity deduction failure shouldn't break the sale
     }
   }
 
@@ -345,188 +519,269 @@ export async function createSale(data: InsertSale): Promise<Sale> {
 }
 
 export async function getTodaySales(): Promise<Sale[]> {
-  await Promise.resolve();
-  const sales = getItem<Sale>(KEYS.SALES);
+  const sales = await getSales();
   return sales.filter((s) => isToday(s.createdAt));
 }
 
 // ─── Expenses ──────────────────────────────────────────────────────────────────
 
 export async function getExpenses(): Promise<Expense[]> {
-  // Future: GET /api/expenses
-  // [QuickBooks integration point: replace with qbo.findPurchases()]
-  await Promise.resolve();
-  const expenses = getItem<Expense>(KEYS.EXPENSES);
-  return expenses.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  await ensureMigrated();
+  try {
+    return await apiGet<Expense>("/api/storehub/expenses");
+  } catch (e) {
+    console.warn("[dataService] getExpenses API failed, using localStorage fallback:", e);
+    return getItem<Expense>(KEYS.EXPENSES).sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+  }
 }
 
 export async function createExpense(data: InsertExpense): Promise<Expense> {
-  // Future: POST /api/expenses
-  // [QuickBooks integration point: replace with qbo.createPurchase()]
-  await Promise.resolve();
-  const expense: Expense = { ...data, id: generateId(), createdAt: now() };
-  const expenses = getItem<Expense>(KEYS.EXPENSES);
-  setItem(KEYS.EXPENSES, [...expenses, expense]);
-  return expense;
+  await ensureMigrated();
+  try {
+    return await apiPost<Expense>("/api/storehub/expenses", data);
+  } catch (e) {
+    console.warn("[dataService] createExpense API failed, saving locally:", e);
+    const expense: Expense = { ...data, id: generateId(), createdAt: now() };
+    setItem(KEYS.EXPENSES, [...getItem<Expense>(KEYS.EXPENSES), expense]);
+    return expense;
+  }
 }
 
 export async function updateExpense(id: string, data: Partial<InsertExpense>): Promise<Expense | null> {
-  await Promise.resolve();
-  const expenses = getItem<Expense>(KEYS.EXPENSES);
-  const idx = expenses.findIndex((e) => e.id === id);
-  if (idx === -1) return null;
-  const updated = { ...expenses[idx], ...data };
-  expenses[idx] = updated;
-  setItem(KEYS.EXPENSES, expenses);
-  return updated;
+  await ensureMigrated();
+  try {
+    return await apiPatch<Expense>(`/api/storehub/expenses/${id}`, data);
+  } catch (e) {
+    console.warn("[dataService] updateExpense API failed, updating locally:", e);
+    const expenses = getItem<Expense>(KEYS.EXPENSES);
+    const idx = expenses.findIndex((e) => e.id === id);
+    if (idx === -1) return null;
+    const updated = { ...expenses[idx], ...data };
+    expenses[idx] = updated;
+    setItem(KEYS.EXPENSES, expenses);
+    return updated;
+  }
 }
 
 export async function deleteExpense(id: string): Promise<boolean> {
-  await Promise.resolve();
-  const expenses = getItem<Expense>(KEYS.EXPENSES);
-  setItem(KEYS.EXPENSES, expenses.filter((e) => e.id !== id));
-  return true;
+  await ensureMigrated();
+  try {
+    await apiDelete(`/api/storehub/expenses/${id}`);
+    return true;
+  } catch (e) {
+    console.warn("[dataService] deleteExpense API failed, deleting locally:", e);
+    setItem(KEYS.EXPENSES, getItem<Expense>(KEYS.EXPENSES).filter((e) => e.id !== id));
+    return true;
+  }
 }
 
 export async function getTodayExpenses(): Promise<Expense[]> {
-  await Promise.resolve();
-  const expenses = getItem<Expense>(KEYS.EXPENSES);
+  const expenses = await getExpenses();
   return expenses.filter((e) => isToday(e.date));
 }
 
 // ─── Suppliers ─────────────────────────────────────────────────────────────────
 
 export async function getSuppliers(): Promise<Supplier[]> {
-  await Promise.resolve();
-  return getItem<Supplier>(KEYS.SUPPLIERS);
+  await ensureMigrated();
+  try {
+    return await apiGet<Supplier>("/api/storehub/suppliers");
+  } catch (e) {
+    console.warn("[dataService] getSuppliers API failed, using localStorage fallback:", e);
+    return getItem<Supplier>(KEYS.SUPPLIERS);
+  }
 }
 
 export async function createSupplier(data: InsertSupplier): Promise<Supplier> {
-  await Promise.resolve();
-  const supplier: Supplier = { ...data, id: generateId(), createdAt: now() };
-  const suppliers = getItem<Supplier>(KEYS.SUPPLIERS);
-  setItem(KEYS.SUPPLIERS, [...suppliers, supplier]);
-  return supplier;
+  await ensureMigrated();
+  try {
+    return await apiPost<Supplier>("/api/storehub/suppliers", data);
+  } catch (e) {
+    console.warn("[dataService] createSupplier API failed, saving locally:", e);
+    const supplier: Supplier = { ...data, id: generateId(), createdAt: now() };
+    setItem(KEYS.SUPPLIERS, [...getItem<Supplier>(KEYS.SUPPLIERS), supplier]);
+    return supplier;
+  }
 }
 
 export async function updateSupplier(id: string, data: Partial<InsertSupplier>): Promise<Supplier | null> {
-  await Promise.resolve();
-  const suppliers = getItem<Supplier>(KEYS.SUPPLIERS);
-  const idx = suppliers.findIndex((s) => s.id === id);
-  if (idx === -1) return null;
-  const updated = { ...suppliers[idx], ...data };
-  suppliers[idx] = updated;
-  setItem(KEYS.SUPPLIERS, suppliers);
-  return updated;
+  await ensureMigrated();
+  try {
+    return await apiPatch<Supplier>(`/api/storehub/suppliers/${id}`, data);
+  } catch (e) {
+    console.warn("[dataService] updateSupplier API failed, updating locally:", e);
+    const suppliers = getItem<Supplier>(KEYS.SUPPLIERS);
+    const idx = suppliers.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    const updated = { ...suppliers[idx], ...data };
+    suppliers[idx] = updated;
+    setItem(KEYS.SUPPLIERS, suppliers);
+    return updated;
+  }
 }
 
 export async function deleteSupplier(id: string): Promise<boolean> {
-  await Promise.resolve();
-  const suppliers = getItem<Supplier>(KEYS.SUPPLIERS);
-  setItem(KEYS.SUPPLIERS, suppliers.filter((s) => s.id !== id));
-  return true;
+  await ensureMigrated();
+  try {
+    await apiDelete(`/api/storehub/suppliers/${id}`);
+    return true;
+  } catch (e) {
+    console.warn("[dataService] deleteSupplier API failed, deleting locally:", e);
+    setItem(KEYS.SUPPLIERS, getItem<Supplier>(KEYS.SUPPLIERS).filter((s) => s.id !== id));
+    return true;
+  }
 }
 
 // ─── Employees ─────────────────────────────────────────────────────────────────
 
 export async function getEmployees(): Promise<Employee[]> {
-  // Future: GET /api/employees
-  await Promise.resolve();
-  return getItem<Employee>(KEYS.EMPLOYEES);
+  await ensureMigrated();
+  try {
+    return await apiGet<Employee>("/api/storehub/employees");
+  } catch (e) {
+    console.warn("[dataService] getEmployees API failed, using localStorage fallback:", e);
+    return getItem<Employee>(KEYS.EMPLOYEES);
+  }
 }
 
 export async function createEmployee(data: InsertEmployee): Promise<Employee> {
-  // Future: POST /api/employees
-  await Promise.resolve();
-  const employee: Employee = { ...data, id: generateId(), createdAt: now() };
-  const employees = getItem<Employee>(KEYS.EMPLOYEES);
-  setItem(KEYS.EMPLOYEES, [...employees, employee]);
-  return employee;
+  await ensureMigrated();
+  try {
+    return await apiPost<Employee>("/api/storehub/employees", data);
+  } catch (e) {
+    console.error("[dataService] createEmployee API failed:", (e as Error).message);
+    // Save locally so the next load can retry the sync.
+    const employee: Employee = { ...data, id: generateId(), createdAt: now() };
+    setItem(KEYS.EMPLOYEES, [...getItem<Employee>(KEYS.EMPLOYEES), employee]);
+    // Re-throw so the UI can show an error toast.
+    throw e;
+  }
 }
 
 export async function updateEmployee(id: string, data: Partial<InsertEmployee>): Promise<Employee | null> {
-  await Promise.resolve();
-  const employees = getItem<Employee>(KEYS.EMPLOYEES);
-  const idx = employees.findIndex((e) => e.id === id);
-  if (idx === -1) return null;
-  const updated = { ...employees[idx], ...data };
-  employees[idx] = updated;
-  setItem(KEYS.EMPLOYEES, employees);
-  return updated;
+  await ensureMigrated();
+  try {
+    return await apiPatch<Employee>(`/api/storehub/employees/${id}`, data);
+  } catch (e) {
+    console.warn("[dataService] updateEmployee API failed, updating locally:", e);
+    const employees = getItem<Employee>(KEYS.EMPLOYEES);
+    const idx = employees.findIndex((e) => e.id === id);
+    if (idx === -1) return null;
+    const updated = { ...employees[idx], ...data };
+    employees[idx] = updated;
+    setItem(KEYS.EMPLOYEES, employees);
+    return updated;
+  }
 }
 
 export async function deleteEmployee(id: string): Promise<boolean> {
-  // Future: DELETE /api/employees/:id
-  await Promise.resolve();
-  const employees = getItem<Employee>(KEYS.EMPLOYEES);
-  setItem(KEYS.EMPLOYEES, employees.filter((e) => e.id !== id));
-  return true;
+  await ensureMigrated();
+  try {
+    await apiDelete(`/api/storehub/employees/${id}`);
+    return true;
+  } catch (e) {
+    console.warn("[dataService] deleteEmployee API failed, deleting locally:", e);
+    setItem(KEYS.EMPLOYEES, getItem<Employee>(KEYS.EMPLOYEES).filter((e) => e.id !== id));
+    return true;
+  }
 }
 
 // ─── Shifts ────────────────────────────────────────────────────────────────────
 
 export async function getShifts(): Promise<Shift[]> {
-  // Future: GET /api/shifts
-  await Promise.resolve();
-  const shifts = getItem<Shift>(KEYS.SHIFTS);
-  return shifts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  await ensureMigrated();
+  try {
+    const apiShifts = await apiGet<Shift>("/api/storehub/shifts");
+    // Merge any locally-saved shifts that haven't synced to DB yet (e.g. from a failed clock-in POST)
+    const localShifts = getItem<Shift>(KEYS.SHIFTS);
+    const apiIds = new Set(apiShifts.map((s) => s.id));
+    const pendingLocal = localShifts.filter((s) => !apiIds.has(s.id));
+    return [...apiShifts, ...pendingLocal].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  } catch (e) {
+    console.warn("[dataService] getShifts API failed, using localStorage fallback:", e);
+    return getItem<Shift>(KEYS.SHIFTS).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
 }
 
 export async function getActiveShift(employeeId: string): Promise<Shift | null> {
-  await Promise.resolve();
-  const shifts = getItem<Shift>(KEYS.SHIFTS);
+  const shifts = await getShifts();
   return shifts.find((s) => s.employeeId === employeeId && s.shiftEnd === null) ?? null;
 }
 
 export async function clockIn(employeeId: string, employeeName: string): Promise<Shift> {
-  const shift: Shift = {
-    id: generateId(),
+  const shiftData: InsertShift = {
     employeeId,
     employeeName,
     shiftStart: now(),
     shiftEnd: null,
     hoursWorked: null,
-    createdAt: now(),
   };
-  const shifts = getItem<Shift>(KEYS.SHIFTS);
-  setItem(KEYS.SHIFTS, [...shifts, shift]);
-  return shift;
+  await ensureMigrated();
+  try {
+    return await apiPost<Shift>("/api/storehub/shifts", shiftData);
+  } catch (e) {
+    console.warn("[dataService] clockIn API failed, saving locally:", e);
+    const shift: Shift = { ...shiftData, id: generateId(), createdAt: now() };
+    setItem(KEYS.SHIFTS, [...getItem<Shift>(KEYS.SHIFTS), shift]);
+    return shift;
+  }
 }
 
-export async function clockOut(shiftId: string): Promise<Shift | null> {
-  await Promise.resolve();
-  const shifts = getItem<Shift>(KEYS.SHIFTS);
-  const idx = shifts.findIndex((s) => s.id === shiftId);
-  if (idx === -1) return null;
+export async function clockOut(shift: Shift): Promise<Shift | null> {
   const endTime = now();
-  const start = new Date(shifts[idx].shiftStart).getTime();
+  const start = new Date(shift.shiftStart).getTime();
   const end = new Date(endTime).getTime();
   const hoursWorked = Math.round(((end - start) / 3600000) * 100) / 100;
-  const updated = { ...shifts[idx], shiftEnd: endTime, hoursWorked };
-  shifts[idx] = updated;
-  setItem(KEYS.SHIFTS, shifts);
-  return updated;
+
+  try {
+    return await apiPatch<Shift>(`/api/storehub/shifts/${shift.id}`, { shiftEnd: endTime, hoursWorked });
+  } catch (e) {
+    console.warn("[dataService] clockOut API failed, saving locally:", e);
+    const updated = { ...shift, shiftEnd: endTime, hoursWorked };
+    const localShifts = getItem<Shift>(KEYS.SHIFTS);
+    const idx = localShifts.findIndex((s) => s.id === shift.id);
+    if (idx === -1) {
+      setItem(KEYS.SHIFTS, [...localShifts, updated]);
+    } else {
+      localShifts[idx] = updated;
+      setItem(KEYS.SHIFTS, localShifts);
+    }
+    return updated;
+  }
 }
 
 export async function createShift(data: InsertShift): Promise<Shift> {
-  // Future: POST /api/shifts
-  await Promise.resolve();
-  const shift: Shift = { ...data, id: generateId(), createdAt: now() };
-  const shifts = getItem<Shift>(KEYS.SHIFTS);
-  setItem(KEYS.SHIFTS, [...shifts, shift]);
-  return shift;
+  await ensureMigrated();
+  try {
+    return await apiPost<Shift>("/api/storehub/shifts", data);
+  } catch (e) {
+    console.warn("[dataService] createShift API failed, saving locally:", e);
+    const shift: Shift = { ...data, id: generateId(), createdAt: now() };
+    setItem(KEYS.SHIFTS, [...getItem<Shift>(KEYS.SHIFTS), shift]);
+    return shift;
+  }
 }
 
 export async function updateShift(id: string, data: Partial<InsertShift>): Promise<Shift | null> {
-  // Future: PATCH /api/shifts/:id
-  await Promise.resolve();
-  const shifts = getItem<Shift>(KEYS.SHIFTS);
-  const idx = shifts.findIndex((s) => s.id === id);
-  if (idx === -1) return null;
-  const updated = { ...shifts[idx], ...data };
-  shifts[idx] = updated;
-  setItem(KEYS.SHIFTS, shifts);
-  return updated;
+  await ensureMigrated();
+  try {
+    return await apiPatch<Shift>(`/api/storehub/shifts/${id}`, data);
+  } catch (e) {
+    console.warn("[dataService] updateShift API failed, updating locally:", e);
+    const shifts = getItem<Shift>(KEYS.SHIFTS);
+    const idx = shifts.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    const updated = { ...shifts[idx], ...data };
+    shifts[idx] = updated;
+    setItem(KEYS.SHIFTS, shifts);
+    return updated;
+  }
 }
 
 // ─── Recurring Expenses ────────────────────────────────────────────────────────
@@ -572,7 +827,6 @@ export function calcNextDue(
     return next.toISOString().split("T")[0];
   }
 
-  // yearly
   const tMonth = monthOfYear ?? 0;
   const tDay = dayOfMonth ?? 1;
   let next = new Date(today.getFullYear(), tMonth, tDay);
@@ -581,120 +835,146 @@ export function calcNextDue(
 }
 
 export async function getRecurringExpenses(): Promise<RecurringExpense[]> {
-  await Promise.resolve();
-  return getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES);
+  await ensureMigrated();
+  try {
+    return await apiGet<RecurringExpense>("/api/storehub/recurring-expenses");
+  } catch (e) {
+    console.warn("[dataService] getRecurringExpenses API failed, using localStorage fallback:", e);
+    return getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES);
+  }
 }
 
 export async function createRecurringExpense(data: InsertRecurringExpense): Promise<RecurringExpense> {
-  await Promise.resolve();
-  const r: RecurringExpense = { ...data, id: generateId(), createdAt: now() };
-  const list = getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES);
-  setItem(KEYS.RECURRING_EXPENSES, [...list, r]);
-  return r;
+  await ensureMigrated();
+  try {
+    return await apiPost<RecurringExpense>("/api/storehub/recurring-expenses", data);
+  } catch (e) {
+    console.warn("[dataService] createRecurringExpense API failed, saving locally:", e);
+    const r: RecurringExpense = { ...data, id: generateId(), createdAt: now() };
+    setItem(KEYS.RECURRING_EXPENSES, [...getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES), r]);
+    return r;
+  }
 }
 
 export async function updateRecurringExpense(
   id: string,
   data: Partial<InsertRecurringExpense>,
 ): Promise<RecurringExpense | null> {
-  await Promise.resolve();
-  const list = getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES);
-  const idx = list.findIndex((r) => r.id === id);
-  if (idx === -1) return null;
-  const updated = { ...list[idx], ...data };
-  list[idx] = updated;
-  setItem(KEYS.RECURRING_EXPENSES, list);
-  return updated;
+  await ensureMigrated();
+  try {
+    return await apiPatch<RecurringExpense>(`/api/storehub/recurring-expenses/${id}`, data);
+  } catch (e) {
+    console.warn("[dataService] updateRecurringExpense API failed, updating locally:", e);
+    const list = getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES);
+    const idx = list.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    const updated = { ...list[idx], ...data };
+    list[idx] = updated;
+    setItem(KEYS.RECURRING_EXPENSES, list);
+    return updated;
+  }
 }
 
 export async function deleteRecurringExpense(id: string): Promise<boolean> {
-  await Promise.resolve();
-  const list = getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES);
-  setItem(KEYS.RECURRING_EXPENSES, list.filter((r) => r.id !== id));
-  return true;
+  await ensureMigrated();
+  try {
+    await apiDelete(`/api/storehub/recurring-expenses/${id}`);
+    return true;
+  } catch (e) {
+    console.warn("[dataService] deleteRecurringExpense API failed, deleting locally:", e);
+    setItem(KEYS.RECURRING_EXPENSES, getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES).filter((r) => r.id !== id));
+    return true;
+  }
 }
 
 export async function processRecurringExpenses(): Promise<Array<{ description: string; amount: number }>> {
-  await Promise.resolve();
-  const list = getItem<RecurringExpense>(KEYS.RECURRING_EXPENSES);
+  const list = await getRecurringExpenses();
   const todayStr = new Date().toISOString().split("T")[0];
   const autoCreated: Array<{ description: string; amount: number }> = [];
 
-  const updatedList = list.map((r) => {
-    if (!r.enabled) return r;
-    if (r.lastProcessed === todayStr) return r;
-    if (!isDueToday(r)) return r;
+  for (const r of list) {
+    if (!r.enabled) continue;
+    if (r.lastProcessed === todayStr) continue;
+    if (!isDueToday(r)) continue;
 
-    const expense: Expense = {
-      id: generateId(),
+    await createExpense({
       description: `${r.description} (auto)`,
       amount: r.amount,
       category: r.category,
       date: todayStr,
-      createdAt: now(),
-    };
-    const expenses = getItem<Expense>(KEYS.EXPENSES);
-    setItem(KEYS.EXPENSES, [...expenses, expense]);
+    });
     autoCreated.push({ description: r.description, amount: r.amount });
-    return { ...r, lastProcessed: todayStr };
-  });
+    await updateRecurringExpense(r.id, { lastProcessed: todayStr });
+  }
 
-  setItem(KEYS.RECURRING_EXPENSES, updatedList);
   return autoCreated;
 }
 
 // ─── Scheduled Price Changes ───────────────────────────────────────────────────
 
 export async function getScheduledPriceChanges(): Promise<ScheduledPriceChange[]> {
-  await Promise.resolve();
-  return getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES);
+  await ensureMigrated();
+  try {
+    return await apiGet<ScheduledPriceChange>("/api/storehub/scheduled-prices");
+  } catch (e) {
+    console.warn("[dataService] getScheduledPriceChanges API failed, using localStorage fallback:", e);
+    return getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES);
+  }
 }
 
 export async function createScheduledPriceChange(
   data: InsertScheduledPriceChange,
 ): Promise<ScheduledPriceChange> {
-  await Promise.resolve();
-  const sc: ScheduledPriceChange = {
-    ...data,
-    id: generateId(),
-    status: "pending",
-    createdAt: now(),
-  };
-  const list = getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES);
-  setItem(KEYS.SCHEDULED_PRICES, [...list, sc]);
-  return sc;
+  await ensureMigrated();
+  try {
+    return await apiPost<ScheduledPriceChange>("/api/storehub/scheduled-prices", { ...data, status: "pending" });
+  } catch (e) {
+    console.warn("[dataService] createScheduledPriceChange API failed, saving locally:", e);
+    const sc: ScheduledPriceChange = { ...data, id: generateId(), status: "pending", createdAt: now() };
+    setItem(KEYS.SCHEDULED_PRICES, [...getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES), sc]);
+    return sc;
+  }
 }
 
 export async function updateScheduledPriceChange(
   id: string,
   data: Partial<ScheduledPriceChange>,
 ): Promise<ScheduledPriceChange | null> {
-  await Promise.resolve();
-  const list = getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES);
-  const idx = list.findIndex((s) => s.id === id);
-  if (idx === -1) return null;
-  const updated = { ...list[idx], ...data };
-  list[idx] = updated;
-  setItem(KEYS.SCHEDULED_PRICES, list);
-  return updated;
+  await ensureMigrated();
+  try {
+    return await apiPatch<ScheduledPriceChange>(`/api/storehub/scheduled-prices/${id}`, data);
+  } catch (e) {
+    console.warn("[dataService] updateScheduledPriceChange API failed, updating locally:", e);
+    const list = getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES);
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    const updated = { ...list[idx], ...data };
+    list[idx] = updated;
+    setItem(KEYS.SCHEDULED_PRICES, list);
+    return updated;
+  }
 }
 
 export async function deleteScheduledPriceChange(id: string): Promise<boolean> {
-  await Promise.resolve();
-  const list = getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES);
-  setItem(KEYS.SCHEDULED_PRICES, list.filter((s) => s.id !== id));
-  return true;
+  await ensureMigrated();
+  try {
+    await apiDelete(`/api/storehub/scheduled-prices/${id}`);
+    return true;
+  } catch (e) {
+    console.warn("[dataService] deleteScheduledPriceChange API failed, deleting locally:", e);
+    setItem(KEYS.SCHEDULED_PRICES, getItem<ScheduledPriceChange>(KEYS.SCHEDULED_PRICES).filter((s) => s.id !== id));
+    return true;
+  }
 }
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────────
 
 export async function getDashboardSummary(profile: UserProfile | null): Promise<DashboardSummary> {
-  // Future: GET /api/dashboard/summary
-  await Promise.resolve();
-
-  const sales = getItem<Sale>(KEYS.SALES);
-  const expenses = getItem<Expense>(KEYS.EXPENSES);
-  const products = getItem<Product>(KEYS.PRODUCTS);
+  const [sales, expenses, products] = await Promise.all([
+    getSales(),
+    getExpenses(),
+    getProducts(),
+  ]);
 
   const todaySales = sales.filter((s) => isToday(s.createdAt));
   const todayExpenses = expenses.filter((e) => isToday(e.date));
@@ -825,30 +1105,45 @@ export async function getDashboardSummary(profile: UserProfile | null): Promise<
 // ─── Daily Pay Records ─────────────────────────────────────────────────────────
 
 export async function getDailyPayRecords(): Promise<DailyPayRecord[]> {
-  await Promise.resolve();
-  return getItem<DailyPayRecord>("storehub_daily_pay_records");
+  await ensureMigrated();
+  try {
+    return await apiGet<DailyPayRecord>("/api/storehub/daily-pay-records");
+  } catch (e) {
+    console.warn("[dataService] getDailyPayRecords API failed, using localStorage fallback:", e);
+    return getItem<DailyPayRecord>("storehub_daily_pay_records");
+  }
 }
 
 export async function createDailyPayRecord(data: InsertDailyPayRecord): Promise<DailyPayRecord> {
-  await Promise.resolve();
-  const record: DailyPayRecord = { ...data, id: generateId(), createdAt: now() };
-  const list = getItem<DailyPayRecord>("storehub_daily_pay_records");
-  setItem("storehub_daily_pay_records", [...list, record]);
-  return record;
+  await ensureMigrated();
+  try {
+    return await apiPost<DailyPayRecord>("/api/storehub/daily-pay-records", data);
+  } catch (e) {
+    console.warn("[dataService] createDailyPayRecord API failed, saving locally:", e);
+    const record: DailyPayRecord = { ...data, id: generateId(), createdAt: now() };
+    setItem("storehub_daily_pay_records", [...getItem<DailyPayRecord>("storehub_daily_pay_records"), record]);
+    return record;
+  }
 }
 
 export async function deleteDailyPayRecord(id: string): Promise<boolean> {
-  await Promise.resolve();
-  const list = getItem<DailyPayRecord>("storehub_daily_pay_records");
-  setItem("storehub_daily_pay_records", list.filter((r) => r.id !== id));
-  return true;
+  await ensureMigrated();
+  try {
+    await apiDelete(`/api/storehub/daily-pay-records/${id}`);
+    return true;
+  } catch (e) {
+    console.warn("[dataService] deleteDailyPayRecord API failed, deleting locally:", e);
+    setItem("storehub_daily_pay_records", getItem<DailyPayRecord>("storehub_daily_pay_records").filter((r) => r.id !== id));
+    return true;
+  }
 }
 
 export async function getPayrollReport(start: string, end: string): Promise<PayrollReportEntry[]> {
-  await Promise.resolve();
-  const emps = getItem<Employee>(KEYS.EMPLOYEES);
-  const allShifts = getItem<Shift>(KEYS.SHIFTS);
-  const allDailyRecords = getItem<DailyPayRecord>("storehub_daily_pay_records");
+  const [emps, allShifts, allDailyRecords] = await Promise.all([
+    getEmployees(),
+    getShifts(),
+    getDailyPayRecords(),
+  ]);
 
   const startDate = new Date(start);
   const endDate   = new Date(end + "T23:59:59");
@@ -885,22 +1180,60 @@ export async function getPayrollReport(start: string, end: string): Promise<Payr
   });
 }
 
+// ─── Month Close Records (localStorage only — no backend route) ───────────────
+
+export async function getMonthCloseRecords(): Promise<MonthCloseRecord[]> {
+  await Promise.resolve();
+  return getItem<MonthCloseRecord>(KEYS.MONTH_CLOSE_RECORDS);
+}
+
+export async function getMonthCloseRecord(month: number, year: number): Promise<MonthCloseRecord | null> {
+  await Promise.resolve();
+  return getItem<MonthCloseRecord>(KEYS.MONTH_CLOSE_RECORDS).find(
+    (r) => r.month === month && r.year === year
+  ) ?? null;
+}
+
+export async function createMonthCloseRecord(data: Omit<MonthCloseRecord, 'id' | 'createdAt' | 'closedAt'> & { notes?: string; completedSteps?: string[] }): Promise<MonthCloseRecord> {
+  await Promise.resolve();
+  const record: MonthCloseRecord = {
+    id: generateId(),
+    month: data.month,
+    year: data.year,
+    closedAt: new Date().toISOString(),
+    notes: data.notes ?? '',
+    completedSteps: data.completedSteps ?? [],
+    revenue: data.revenue,
+    expenses: data.expenses,
+    profit: data.profit,
+    supplierSpending: data.supplierSpending,
+    shrinkage: data.shrinkage,
+    cashVariance: data.cashVariance,
+    createdAt: now(),
+  };
+  const list = getItem<MonthCloseRecord>(KEYS.MONTH_CLOSE_RECORDS);
+  setItem(KEYS.MONTH_CLOSE_RECORDS, [...list, record]);
+  return record;
+}
+
+export async function isMonthClosed(month: number, year: number): Promise<boolean> {
+  return (await getMonthCloseRecord(month, year)) !== null;
+}
+
 export async function getTaxSummary(): Promise<{
   profile: { country?: string; stateCode?: string; taxRate: number; currency: string };
   currentMonth: { totalSales: number; taxCollected: number; totalExpenses: number };
   ytd: { totalSales: number; taxCollected: number; totalExpenses: number };
 } | null> {
-  await Promise.resolve();
   const profile = getSingle<UserProfile>(KEYS.USER_PROFILE);
   if (!profile) return null;
 
-  const allSales = getItem<Sale>(KEYS.SALES);
-  const allExpenses = getItem<Expense>(KEYS.EXPENSES);
+  const [allSales, allExpenses] = await Promise.all([getSales(), getExpenses()]);
   const taxRate = profile.taxRate ?? 0;
 
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const yearStart  = new Date(now.getFullYear(), 0, 1);
+  const nowDate = new Date();
+  const monthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
+  const yearStart  = new Date(nowDate.getFullYear(), 0, 1);
 
   const filterSales = (from: Date) =>
     allSales.filter((s) => new Date(s.createdAt) >= from).reduce((sum, s) => sum + s.total, 0);
@@ -919,7 +1252,7 @@ export async function getTaxSummary(): Promise<{
   };
 }
 
-// ─── Category Settings (Threshold & Margin Targets) ────────────────────────────
+// ─── Category Settings (localStorage only — no backend route) ─────────────────
 
 const CATEGORY_SETTINGS_KEY = "storehub_category_settings";
 
@@ -938,4 +1271,108 @@ export async function upsertCategorySetting(setting: CategorySetting): Promise<v
     settings.push(setting);
   }
   setItem(CATEGORY_SETTINGS_KEY, settings);
+}
+
+// ─── Refunds ───────────────────────────────────────────────────────────────────
+
+export async function createRefund(data: InsertRefund): Promise<Refund> {
+  await ensureMigrated();
+  let refund: Refund;
+  try {
+    refund = await apiPost<Refund>("/api/storehub/refunds", data);
+  } catch (e) {
+    console.warn("[dataService] createRefund API failed, saving locally:", e);
+    refund = { ...data, id: generateId(), createdAt: now() };
+    const existing = getItem<Refund>(KEYS.REFUNDS);
+    if (!existing.some((r) => r.id === refund.id)) {
+      setItem(KEYS.REFUNDS, [...existing, refund]);
+    }
+  }
+  return refund;
+}
+
+export async function getRefunds(): Promise<Refund[]> {
+  await ensureMigrated();
+  try {
+    const apiRefunds = await apiGet<Refund>("/api/storehub/refunds");
+    const localRefunds = getItem<Refund>(KEYS.REFUNDS);
+    const apiIds = new Set(apiRefunds.map((r) => r.id));
+    const pendingLocal = localRefunds.filter((r) => !apiIds.has(r.id));
+    return [...apiRefunds, ...pendingLocal].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  } catch (e) {
+    console.warn("[dataService] getRefunds API failed, using local:", e);
+    return getItem<Refund>(KEYS.REFUNDS).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+}
+
+export async function getRefund(id: string): Promise<Refund | null> {
+  const all = await getRefunds();
+  return all.find((r) => r.id === id) ?? null;
+}
+
+export async function deleteRefund(id: string): Promise<boolean> {
+  try {
+    await apiDelete(`/api/storehub/refunds/${id}`);
+  } catch {
+    setItem(KEYS.REFUNDS, getItem<Refund>(KEYS.REFUNDS).filter((r) => r.id !== id));
+  }
+  return true;
+}
+
+// ─── Cash Shifts (localStorage only — no backend route) ───────────────────────
+
+const CASH_SHIFTS_DB_KEY = "storehub_cash_shifts_db";
+
+export async function createCashShift(data: InsertCashShift): Promise<CashShift> {
+  await Promise.resolve();
+  const shift: CashShift = { ...data, id: generateId() };
+  setItem(CASH_SHIFTS_DB_KEY, [...getItem<CashShift>(CASH_SHIFTS_DB_KEY), shift]);
+  return shift;
+}
+
+export async function getCashShifts(): Promise<CashShift[]> {
+  await Promise.resolve();
+  return getItem<CashShift>(CASH_SHIFTS_DB_KEY);
+}
+
+export async function getCashShift(id: string): Promise<CashShift | null> {
+  await Promise.resolve();
+  return getItem<CashShift>(CASH_SHIFTS_DB_KEY).find((s) => s.id === id) ?? null;
+}
+
+export async function updateCashShift(id: string, data: Partial<InsertCashShift>): Promise<CashShift | null> {
+  await Promise.resolve();
+  const shifts = getItem<CashShift>(CASH_SHIFTS_DB_KEY);
+  const idx = shifts.findIndex((s) => s.id === id);
+  if (idx === -1) return null;
+  const updated = { ...shifts[idx], ...data };
+  shifts[idx] = updated;
+  setItem(CASH_SHIFTS_DB_KEY, shifts);
+  return updated;
+}
+
+export async function deleteCashShift(id: string): Promise<boolean> {
+  await Promise.resolve();
+  setItem(CASH_SHIFTS_DB_KEY, getItem<CashShift>(CASH_SHIFTS_DB_KEY).filter((s) => s.id !== id));
+  return true;
+}
+
+// ─── Payment Settings ─────────────────────────────────────────────────────────
+
+export async function getPaymentSettings(): Promise<any> {
+  await Promise.resolve();
+  const profile = await getUserProfile();
+  return profile?.paymentSettings ?? null;
+}
+
+export async function savePaymentSettings(settings: any): Promise<void> {
+  await Promise.resolve();
+  const profile = await getUserProfile();
+  if (profile) {
+    await updateUserProfile({ paymentSettings: settings });
+  }
 }

@@ -34,7 +34,7 @@ type StepKey =
   // Other branches
   | "other_description" | "other_products" | "other_inventory"
   // Universal
-  | "staffCount" | "currentSystem" | "posSystemName"
+  | "staffCount" | "currentSystem" | "posSystemName" | "paymentMethod"
   | "painPoints" | "stockOuts" | "supplierStyle" | "goal"
   // Country selection
   | "country" | "province"
@@ -95,6 +95,7 @@ interface Answers {
   staffCount: "solo" | "small" | "medium" | "multi" | "";
   currentSystem: "paper" | "spreadsheets" | "pos" | "multiple" | "";
   posSystemName: string;
+  paymentMethod: "has_pos" | "cash_register" | "card_reader" | "cash_only" | "need_solution" | "";
   painPoints: string[];
   stockOuts: string[];
   supplierStyle: string;
@@ -135,7 +136,7 @@ const BLANK: Answers = {
   sellsFuel: false, hasCarWash: false, hasDeli: false, gasStationPos: "",
   sellsRetailProducts: false, takesAppointments: false,
   otherDescription: "", sellsPhysicalProducts: false, hasInventoryToTrack: false,
-  staffCount: "", currentSystem: "", posSystemName: "",
+  staffCount: "", currentSystem: "", posSystemName: "", paymentMethod: "",
   painPoints: [], stockOuts: [], supplierStyle: "", goal: "",
   country: "", province: "",
   storeName: "", ownerName: "", stateCode: "", stateName: "",
@@ -227,8 +228,9 @@ function getNextStep(step: StepKey, a: Partial<Answers>): StepKey | null {
     case "staffCount":
       return "currentSystem";
     case "currentSystem":
-      return (a.currentSystem === "pos" || a.currentSystem === "multiple") ? "posSystemName" : "painPoints";
-    case "posSystemName": return "painPoints";
+      return (a.currentSystem === "pos" || a.currentSystem === "multiple") ? "posSystemName" : "paymentMethod";
+    case "posSystemName": return "paymentMethod";
+    case "paymentMethod": return "painPoints";
     case "painPoints":    return "stockOuts";
     case "stockOuts":     return "supplierStyle";
     case "supplierStyle": return "goal";
@@ -259,12 +261,12 @@ const STEP_POS: Partial<Record<StepKey, number>> = {
   gas_carwash: 3, salon_appointments: 3, other_products: 3,
   restaurant_tables: 4, grocery_hotfood: 4, gas_kitchen: 4, other_inventory: 4,
   gas_pos: 5,
-  staffCount: 6, currentSystem: 7, posSystemName: 8,
-  painPoints: 9, stockOuts: 10, supplierStyle: 11, goal: 12,
-  country: 13, province: 13,
-  storeInfo: 14, logo: 15, catalog: 16,
+  staffCount: 6, currentSystem: 7, posSystemName: 8, paymentMethod: 9,
+  painPoints: 10, stockOuts: 11, supplierStyle: 12, goal: 13,
+  country: 14, province: 14,
+  storeInfo: 15, logo: 16, catalog: 17,
 };
-const TOTAL_STEPS = 16;
+const TOTAL_STEPS = 17;
 
 // ─── Data-driven config ───────────────────────────────────────────────────────
 
@@ -414,6 +416,18 @@ const SELECT_CONFIG: Partial<Record<StepKey, SelectConfig>> = {
       { value: "quickbooks", emoji: "📒", label: "QuickBooks" },
       { value: "other_pos",  emoji: "🔀", label: "Other POS" },
     ],
+  },
+  paymentMethod: {
+    question: "How do you currently accept payments?",
+    answerKey: "paymentMethod",
+    options: [
+      { value: "has_pos",       emoji: "💳", label: "I have a POS system already" },
+      { value: "cash_register", emoji: "🏪", label: "I have a cash register" },
+      { value: "card_reader",   emoji: "📱", label: "I use a card reader" },
+      { value: "cash_only",     emoji: "💵", label: "I use cash only" },
+      { value: "need_solution", emoji: "🆘", label: "I need a payment solution" },
+    ],
+    wide: true,
   },
   supplierStyle: {
     question: "How do you order from suppliers?",
@@ -576,12 +590,13 @@ function generateSmartTips(a: Answers): { text: string }[] {
 
 function generateChecklist(a: Answers): { icon: string; text: string }[] {
   const items: { icon: string; text: string }[] = [];
+  if (a.paymentMethod === "need_solution") items.push({ icon: "💳", text: "Set up payment methods in Payments & POS" });
   if (a.stockOuts.length > 0 || a.painPoints.includes("reorder")) items.push({ icon: "📦", text: "Add your top products to Inventory" });
   if (a.staffCount !== "solo") items.push({ icon: "👥", text: "Add your employees and set their PINs" });
   if (a.supplierStyle && a.supplierStyle !== "none") items.push({ icon: "🚛", text: "Add your main suppliers" });
   if (a.posSystemName) items.push({ icon: "🔌", text: `Connect your ${a.posSystemName.replace("_pos","").replace("_"," ")} POS` });
   items.push({ icon: "💰", text: "Make your first sale with the POS" });
-  return items.slice(0, 3);
+  return items.slice(0, 4);
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -763,6 +778,8 @@ export default function OnboardingPage() {
         otherDescription: a.otherDescription || undefined,
         sellsPhysicalProducts: a.sellsPhysicalProducts || undefined,
         hasInventoryToTrack: a.hasInventoryToTrack || undefined,
+        paymentMethod: a.paymentMethod || undefined,
+        paymentsEnabled: true,
       } as any;
 
       localStorage.setItem("onboardingComplete", "true");

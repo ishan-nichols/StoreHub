@@ -40,7 +40,7 @@ export default function LowMarginAlerts() {
 
   const [updatingId, setUpdatingId]   = useState<string | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
-  const [toast, setToast]             = useState<string | null>(null);
+  const [toast, setToast]             = useState<{ msg: string; isError?: boolean } | null>(null);
 
   const hasPOS = !!profile?.currentPosSystem;
 
@@ -73,9 +73,9 @@ export default function LowMarginAlerts() {
     return hasPOS ? `${base} and synced to your POS` : `${base} successfully`;
   }
 
-  function showToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 4000);
+  function showToast(msg: string, isError = false) {
+    setToast({ msg, isError });
+    setTimeout(() => setToast(null), isError ? 6000 : 4000);
   }
 
   // Remove a single card synchronously — happens BEFORE the async updatePrice
@@ -94,40 +94,67 @@ export default function LowMarginAlerts() {
   }
 
   async function handleUpdateOne(a: MarginAlert) {
-    // 1. Remove card IMMEDIATELY — synchronous, before any await.
     dismissOne(a.product.id);
     setUpdatingId(a.product.id);
 
     const cost      = a.product.costPrice ?? 0;
     const suggested = priceForTargetMargin(cost, a.threshold);
-    await updatePrice(a.product.id, suggested, {
-      reason: `Margin alert fix — restored to ${a.threshold}% target`,
-    });
-
-    setUpdatingId(null);
-    reload();
-    showToast(toastMessage(1));
+    try {
+      const result = await updatePrice(a.product.id, suggested, {
+        reason: `Margin alert fix — restored to ${a.threshold}% target`,
+      });
+      if (!result) throw new Error("Update returned no result");
+      showToast(toastMessage(1));
+    } catch {
+      // Re-add the dismissed card and show error
+      dismissedRef.current.delete(a.product.id);
+      setDisplayedAlerts((prev) => dedupeAlerts([a, ...prev]));
+      showToast("Failed to update price — please try again", true);
+    } finally {
+      setUpdatingId(null);
+      reload();
+    }
   }
 
   async function handleUpdateAll() {
     setUpdatingAll(true);
     const toUpdate = [...displayedAlerts];
-    const count    = toUpdate.length;
 
-    // 2. Remove ALL cards immediately — one synchronous setState before any await.
     dismissAll(toUpdate.map((a) => a.product.id));
+
+    let successCount = 0;
+    const failed: MarginAlert[] = [];
 
     for (const a of toUpdate) {
       const cost      = a.product.costPrice ?? 0;
       const suggested = priceForTargetMargin(cost, a.threshold);
-      await updatePrice(a.product.id, suggested, {
-        reason: `Margin alert fix — restored to ${a.threshold}% target`,
-      });
+      try {
+        const result = await updatePrice(a.product.id, suggested, {
+          reason: `Margin alert fix — restored to ${a.threshold}% target`,
+        });
+        if (!result) throw new Error("no result");
+        successCount++;
+      } catch {
+        failed.push(a);
+      }
+    }
+
+    // Re-add any cards that failed
+    if (failed.length > 0) {
+      failed.forEach((a) => dismissedRef.current.delete(a.product.id));
+      setDisplayedAlerts((prev) => dedupeAlerts([...failed, ...prev]));
+      showToast(
+        successCount > 0
+          ? `${successCount} updated, ${failed.length} failed — please retry`
+          : "Failed to update prices — please try again",
+        true
+      );
+    } else if (successCount > 0) {
+      showToast(toastMessage(successCount));
     }
 
     setUpdatingAll(false);
     reload();
-    showToast(toastMessage(count));
   }
 
   // Nothing to show and never had any alerts → invisible (healthy store from start).
@@ -250,9 +277,9 @@ export default function LowMarginAlerts() {
 
       {/* ── Toast ──────────────────────────────────────────────────────── */}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-emerald-700 text-white text-sm font-semibold px-5 py-3 rounded-full shadow-xl pointer-events-none">
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 text-white text-sm font-semibold px-5 py-3 rounded-full shadow-xl pointer-events-none ${toast.isError ? "bg-red-600" : "bg-emerald-700"}`}>
           <CheckCircle2 className="w-4 h-4 shrink-0" />
-          {toast}
+          {toast.msg}
         </div>
       )}
     </>

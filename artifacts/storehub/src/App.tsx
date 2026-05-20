@@ -1,9 +1,10 @@
-import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
+import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { AppProvider } from "./contexts/AppContext";
 import { useApp } from "./contexts/useApp";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { PermissionsProvider } from "./contexts/PermissionsContext";
 import { CloudSyncBootstrap } from "./components/CloudSyncBootstrap";
 import Layout from "./components/Layout";
 import AIChatWidget from "./components/AIChatWidget";
@@ -20,6 +21,7 @@ import OnboardingPage   from "./pages/OnboardingPage";
 import DashboardPage    from "./pages/DashboardPage";
 import InventoryPage    from "./pages/InventoryPage";
 import POSPage          from "./pages/POSPage";
+import RetailPOSPage    from "./pages/RetailPOSPage";
 import SalesPage        from "./pages/SalesPage";
 import ExpensesPage     from "./pages/ExpensesPage";
 import SuppliersPage    from "./pages/SuppliersPage";
@@ -33,6 +35,15 @@ import TaxPage          from "./pages/TaxPage";
 import CashFlowPage     from "./pages/CashFlowPage";
 import CustomersPage    from "./pages/CustomersPage";
 import CompliancePage   from "./pages/CompliancePage";
+import PaymentsPage from "./pages/PaymentsPage";
+import CashManagementPage from "./pages/CashManagementPage";
+import RefundsPage from "./pages/RefundsPage";
+import SchedulePage    from "./pages/SchedulePage";
+import PayrollPage     from "./pages/PayrollPage";
+import HRPage          from "./pages/HRPage";
+
+// Auth flows
+import InviteAcceptPage from "./pages/auth/InviteAcceptPage";
 
 // Admin screens
 import AdminDashboardPage    from "./pages/admin/AdminDashboardPage";
@@ -106,6 +117,10 @@ function StoreRoutes() {
       <Route path="/dashboard">   {protectedPage(DashboardPage)}    </Route>
       <Route path="/inventory">   {protectedPage(InventoryPage)}    </Route>
       <Route path="/pos">         {protectedPage(POSPage)}          </Route>
+      <Route path="/retail-pos">  {protectedPage(RetailPOSPage)}    </Route>
+      <Route path="/payments">    {protectedPage(PaymentsPage)}     </Route>
+      <Route path="/cash-management"> {protectedPage(CashManagementPage)} </Route>
+      <Route path="/refunds">     {protectedPage(RefundsPage)}      </Route>
       <Route path="/sales">       {protectedPage(SalesPage)}        </Route>
       <Route path="/expenses">    {protectedPage(ExpensesPage)}     </Route>
       <Route path="/suppliers">   {protectedPage(SuppliersPage)}    </Route>
@@ -117,6 +132,9 @@ function StoreRoutes() {
       <Route path="/cashflow">    {protectedPage(CashFlowPage)}     </Route>
       <Route path="/customers">   {protectedPage(CustomersPage)}    </Route>
       <Route path="/compliance">  {protectedPage(CompliancePage)}   </Route>
+      <Route path="/schedule">    {protectedPage(SchedulePage)}     </Route>
+      <Route path="/payroll">     {protectedPage(PayrollPage)}      </Route>
+      <Route path="/hr">          {protectedPage(HRPage)}           </Route>
       <Route path="/settings">    {protectedPage(SettingsPage)}     </Route>
       <Route>
         {isOnboarded || isStoreView ? <Redirect to="/dashboard" /> : <Redirect to="/login" />}
@@ -139,6 +157,12 @@ function StoreApp() {
 
 function AppInner() {
   const { user, isLoading, isAdmin, isBusinessOwner, activeStoreId } = useAuth();
+  const [location] = useLocation();
+
+  // Employee portal is always accessible regardless of who is logged in
+  if (location === "/employee") {
+    return <EmployeePortalPage />;
+  }
 
   if (isLoading) {
     return (
@@ -155,8 +179,10 @@ function AppInner() {
   if (isAdmin && activeStoreId) {
     return (
       <AppProvider>
-        <CloudSyncBootstrap />
-        <StoreApp />
+        <PermissionsProvider>
+          <CloudSyncBootstrap />
+          <StoreApp />
+        </PermissionsProvider>
       </AppProvider>
     );
   }
@@ -172,8 +198,10 @@ function AppInner() {
   if (isBusinessOwner && activeStoreId) {
     return (
       <AppProvider>
-        <CloudSyncBootstrap />
-        <StoreApp />
+        <PermissionsProvider>
+          <CloudSyncBootstrap />
+          <StoreApp />
+        </PermissionsProvider>
       </AppProvider>
     );
   }
@@ -187,6 +215,7 @@ function AppInner() {
   if (!user) {
     return (
       <Switch>
+        <Route path="/join"            component={InviteAcceptPage} />
         <Route path="/employee" component={EmployeePortalPage} />
         <Route path="/splash"          component={SplashScreen} />
         <Route path="/login"           component={LoginPage} />
@@ -201,8 +230,10 @@ function AppInner() {
   // Store owner with their own account
   return (
     <AppProvider>
-      <CloudSyncBootstrap />
-      <StoreApp />
+      <PermissionsProvider>
+        <CloudSyncBootstrap />
+        <StoreApp />
+      </PermissionsProvider>
     </AppProvider>
   );
 }

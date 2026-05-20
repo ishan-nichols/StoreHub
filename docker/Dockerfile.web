@@ -1,0 +1,31 @@
+# ─── Stage 1: Build Vite app ──────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+RUN corepack enable pnpm
+
+WORKDIR /app
+
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY artifacts/storehub/package.json ./artifacts/storehub/
+COPY lib/api-client-react/package.json ./lib/api-client-react/
+COPY lib/api-zod/package.json          ./lib/api-zod/
+COPY lib/api-spec/package.json         ./lib/api-spec/
+
+RUN pnpm install --frozen-lockfile --filter @workspace/storehub...
+
+COPY lib/               ./lib/
+COPY artifacts/storehub/ ./artifacts/storehub/
+COPY tsconfig.base.json  ./
+
+ARG VITE_GOOGLE_CLIENT_ID=""
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+
+RUN pnpm --filter @workspace/storehub build
+
+# ─── Stage 2: Nginx ───────────────────────────────────────────────────────────
+FROM nginx:alpine AS production
+
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/artifacts/storehub/dist /usr/share/nginx/html
+
+EXPOSE 80

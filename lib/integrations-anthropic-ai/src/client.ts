@@ -1,10 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 function createClient() {
-  const baseURL = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
-  if (!baseURL || !apiKey) {
-    throw new Error("Anthropic integration not configured. Set AI_INTEGRATIONS_ANTHROPIC_BASE_URL and AI_INTEGRATIONS_ANTHROPIC_API_KEY.");
+  const baseURL = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com";
+  const apiKey  = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("Anthropic integration not configured. Set ANTHROPIC_API_KEY.");
   }
   return new Anthropic({ apiKey, baseURL });
 }

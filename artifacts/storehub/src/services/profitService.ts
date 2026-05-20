@@ -70,7 +70,9 @@ function getPeriodBounds(period: "today" | "week" | "month" | "year"): { start: 
 function dateToYMD(d: Date): string {
   return d.toISOString().split("T")[0];
 }
-
+function safeLower(value?: string | null): string {
+  return value?.toLowerCase() ?? "";
+}
 // ─── Core Calculations ────────────────────────────────────────────────────────
 
 export function calculateProfitBreakdown(
@@ -106,7 +108,8 @@ export function calculateProfitBreakdown(
     revenue += sale.total;
     for (const item of sale.items) {
       // Find product first by id, then by name
-      const product = productById.get(item.productId) ?? productByName.get(item.productName.toLowerCase());
+      const productNameKey = safeLower(item.productName);
+    const product = productById.get(item.productId) ?? productByName.get(productNameKey);
       if (product?.costPrice != null) {
         cogs += product.costPrice * item.quantity;
       } else {
@@ -191,7 +194,8 @@ export function getProfitByProduct(sales: Sale[], products: Product[]): ProfitBy
 
   for (const sale of sales) {
     for (const item of sale.items) {
-      const product = productById.get(item.productId) ?? productByName.get(item.productName.toLowerCase());
+      const productNameKey = safeLower(item.productName);
+      const product = productById.get(item.productId) ?? productByName.get(productNameKey);
       const key = item.productId || item.productName;
       const existing = map.get(key);
 
@@ -254,7 +258,8 @@ export function getProfitTrend(sales: Sale[], products: Product[], days: 30 | 90
 
     entry.revenue += sale.total;
     for (const item of sale.items) {
-      const product = productById.get(item.productId) ?? productByName.get(item.productName.toLowerCase());
+      const productNameKey = safeLower(item.productName);
+      const product = productById.get(item.productId) ?? productByName.get(productNameKey);
       const cost = product?.costPrice ?? 0;
       entry.cogs += cost * item.quantity;
     }

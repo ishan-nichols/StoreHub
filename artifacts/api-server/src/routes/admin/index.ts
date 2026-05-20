@@ -4,16 +4,19 @@
  */
 
 import { Router } from "express";
-import { eq, sql, desc } from "drizzle-orm";
+import { eq, sql, desc, and, gt, ne } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   users, storeProfiles, products, sales, expenses,
   employees, shifts, suppliers, analyticsEvents, businesses,
+  auditLogs, refreshTokens,
 } from "@workspace/db";
 import { requireAdmin } from "../../middlewares/requireAdmin.js";
 import {
   hashPassword, generateOpaqueToken, validatePasswordStrength,
+  signAccessToken,
 } from "../../lib/auth.js";
+import { logAudit } from "../../lib/audit.js";
 
 const router = Router();
 router.use(requireAdmin);
@@ -430,13 +433,114 @@ router.patch("/users/:id/role", async (req, res) => {
   if (!["superadmin", "store_owner"].includes(role)) {
     return res.status(400).json({ error: "Invalid role" });
   }
-  // Prevent self-demotion
   if (req.params.id === req.userId && role !== "superadmin") {
     return res.status(400).json({ error: "Cannot demote yourself" });
   }
   const [updated] = await db.update(users).set({ role }).where(eq(users.id, req.params.id)).returning();
   if (!updated) return res.status(404).json({ error: "User not found" });
+  logAudit({ req }, { action: "admin.role_change", resourceType: "user", resourceId: req.params.id, newValue: { role } });
   return res.json({ id: updated.id, role: updated.role });
+});
+
+// ─── Platform-wide Audit Log ──────────────────────────────────────────────────
+// GET /api/admin/audit-logs?page=1&limit=100&action=&storeUserId=&from=&to=
+
+router.get("/audit-logs", async (req, res) => {
+  const { page = "1", limit = "100", action, storeUserId, from, to } = req.query as Record<string, string | undefined>;
+  const pageNum  = Math.max(1, parseInt(page, 10));
+  const limitNum = Math.min(500, Math.max(1, parseInt(limit, 10)));
+  const offset   = (pageNum - 1) * limitNum;
+
+  const conditions = [];
+  if (action)      conditions.push(sql`${auditLogs.action} ILIKE ${action + "%"}`);
+  if (storeUserId) conditions.push(eq(auditLogs.storeUserId, storeUserId));
+  if (from)        conditions.push(sql`${auditLogs.createdAt} >= ${new Date(from)}`);
+  if (to)          conditions.push(sql`${auditLogs.createdAt} <= ${new Date(to)}`);
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const [rows, [{ total }]] = await Promise.all([
+    db.select().from(auditLogs).where(where).orderBy(desc(auditLogs.createdAt)).limit(limitNum).offset(offset),
+    db.select({ total: sql<number>`count(*)::int` }).from(auditLogs).where(where),
+  ]);
+
+  return res.json({ data: rows, pagination: { page: pageNum, limit: limitNum, total } });
+});
+
+// ─── Security Events (failed logins, lockouts, MFA events) ───────────────────
+// GET /api/admin/security/events
+
+router.get("/security/events", async (_req, res) => {
+  const rows = await db
+    .select()
+    .from(auditLogs)
+    .where(sql`${auditLogs.action} IN ('auth.login_failed', 'auth.locked', 'auth.mfa_enabled', 'auth.mfa_disabled', 'auth.sessions_revoke_all', 'auth.password_changed')`)
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(500);
+  return res.json(rows);
+});
+
+// ─── Active Sessions (count by user) ─────────────────────────────────────────
+// GET /api/admin/sessions
+
+router.get("/sessions", async (_req, res) => {
+  const rows = await db
+    .select({
+      userId:       refreshTokens.userId,
+      sessionCount: sql<number>`count(*)::int`,
+      lastUsedAt:   sql<Date>`max(${refreshTokens.lastUsedAt})`,
+    })
+    .from(refreshTokens)
+    .where(gt(refreshTokens.expiresAt, new Date()))
+    .groupBy(refreshTokens.userId)
+    .orderBy(sql`count(*) desc`)
+    .limit(200);
+  return res.json(rows);
+});
+
+// ─── Force-logout any user ────────────────────────────────────────────────────
+// DELETE /api/admin/sessions/:userId
+
+router.delete("/sessions/:userId", async (req, res) => {
+  const { userId } = req.params;
+  await db.delete(refreshTokens).where(eq(refreshTokens.userId, userId));
+  logAudit({ req }, { action: "admin.force_logout", resourceType: "user", resourceId: userId });
+  return res.json({ success: true });
+});
+
+// ─── Impersonation ────────────────────────────────────────────────────────────
+// POST /api/admin/impersonate/:userId — issues a short-lived token scoped to that user
+
+router.post("/impersonate/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  const [target] = await db
+    .select({ id: users.id, email: users.email, role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!target) return res.status(404).json({ error: "User not found" });
+  if (target.role === "superadmin") {
+    return res.status(403).json({ error: "Cannot impersonate another superadmin" });
+  }
+
+  // 15-minute impersonation token — carries switchedFromUserId for audit trail
+  const token = signAccessToken({
+    userId:              target.id,
+    email:               target.email ?? "",
+    role:                target.role,
+    switchedFromUserId:  req.userId,
+  });
+
+  logAudit({ req }, {
+    action:       "admin.impersonate",
+    resourceType: "user",
+    resourceId:   userId,
+    metadata:     { targetEmail: target.email, targetRole: target.role },
+  });
+
+  return res.json({ token, expiresIn: "15m", targetUser: { id: target.id, email: target.email, role: target.role } });
 });
 
 export default router;

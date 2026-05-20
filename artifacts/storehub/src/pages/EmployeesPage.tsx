@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from "react";
 import { useApp } from "../contexts/useApp";
+import { useAuth } from "../contexts/AuthContext";
 import {
   getEmployees,
   createEmployee,
+  updateEmployee,
   deleteEmployee,
   getShifts,
   createShift,
@@ -15,7 +17,7 @@ import {
 import type { Employee, Shift, InsertEmployee, InsertShift, DailyPayRecord, PayrollReportEntry } from "../schemas";
 import { formatDate, formatTime, calcHoursWorked, now, getCurrencySymbol } from "../utils";
 import CurrencyInput from "../components/CurrencyInput";
-import { Plus, Trash2, X, Clock, UserPlus, LogIn, LogOut, Timer, Calendar, BarChart2, Sparkles, Loader2, ShieldCheck, Copy, Check, ExternalLink } from "lucide-react";
+import { Plus, Trash2, X, Clock, UserPlus, LogIn, LogOut, Timer, Calendar, BarChart2, Sparkles, Loader2, ShieldCheck, Copy, Check, ExternalLink, Pencil } from "lucide-react";
 
 interface EmployeePermissions {
   pos: boolean;
@@ -97,11 +99,14 @@ interface EmployeeCardProps {
   onLogShift: (emp: Employee) => void;
   onRecordDay: (emp: Employee) => void;
   onDelete: (id: string) => void;
-  onClockIn: (emp: Employee) => void;
-  onClockOut: (shiftId: string) => void;
+  onEdit: (emp: Employee) => void;
+  onClockIn: (emp: Employee) => Promise<void>;
+  onClockOut: (shiftId: string) => Promise<void>;
 }
 
-function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onRecordDay, onDelete, onClockIn, onClockOut }: EmployeeCardProps) {
+function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onRecordDay, onDelete, onEdit, onClockIn, onClockOut }: EmployeeCardProps) {
+  const [clockLoading, setClockLoading] = useState(false);
+  const [clockOutLoading, setClockOutLoading] = useState(false);
   const payrollType = emp.payrollType ?? "hourly";
   const activeShift = payrollType === "hourly" ? shifts.find((s) => s.employeeId === emp.id && s.shiftEnd === null) : undefined;
   const elapsed = useClockTimer(activeShift?.shiftStart ?? null);
@@ -168,6 +173,13 @@ function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onRecordDay, on
             </button>
           )}
           <button
+            onClick={() => onEdit(emp)}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+            title="Edit employee"
+          >
+            <Pencil size={14} />
+          </button>
+          <button
             onClick={() => onDelete(emp.id)}
             className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
           >
@@ -186,18 +198,20 @@ function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onRecordDay, on
               <div className="text-xs text-green-500">Started {formatTime(activeShift.shiftStart)}</div>
             </div>
             <button
-              onClick={() => onClockOut(activeShift.id)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-colors"
+              onClick={() => { setClockOutLoading(true); void onClockOut(activeShift.id).finally(() => setClockOutLoading(false)); }}
+              disabled={clockOutLoading}
+              className="flex items-center gap-1.5 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
             >
-              <LogOut size={14} /> Clock Out
+              {clockOutLoading ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />} Clock Out
             </button>
           </div>
         ) : (
           <button
-            onClick={() => onClockIn(emp)}
-            className="w-full flex items-center justify-center gap-2 mb-3 py-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 rounded-xl text-sm font-semibold transition-colors"
+            onClick={() => { setClockLoading(true); void onClockIn(emp).finally(() => setClockLoading(false)); }}
+            disabled={clockLoading}
+            className="w-full flex items-center justify-center gap-2 mb-3 py-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
           >
-            <LogIn size={14} /> Clock In
+            {clockLoading ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />} Clock In
           </button>
         )
       )}
@@ -243,7 +257,9 @@ function EmployeeCard({ emp, shifts, currencySymbol, onLogShift, onRecordDay, on
 }
 
 function EmployeePortalBanner() {
-  const portalUrl = `${window.location.origin}/employee`;
+  const { user, activeStoreId } = useAuth();
+  const storeUserId = activeStoreId ?? user?.id;
+  const portalUrl = `${window.location.origin}/employee${storeUserId ? `?store=${storeUserId}` : ""}`;
   const [copied, setCopied] = useState(false);
 
   function copy() {
@@ -268,7 +284,7 @@ function EmployeePortalBanner() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <a
-            href="/employee"
+            href={portalUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-white dark:bg-amber-900/40 px-3 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300 hover:bg-amber-100 transition-colors"
@@ -323,6 +339,10 @@ export default function EmployeesPage() {
     end: new Date().toISOString().split("T")[0],
   });
   const [payrollLoading, setPayrollLoading] = useState(false);
+  const [addEmployeeError, setAddEmployeeError] = useState<string | null>(null);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", role: "", jobTitle: "", hourlyWage: 15, dailyWage: 0, payrollType: "hourly" as "hourly" | "daily" | "salary", pin: "", permissions: { ...DEFAULT_PERMISSIONS } });
+  const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const currencySymbol = profile ? getCurrencySymbol(profile.currency) : "$";
 
@@ -337,27 +357,68 @@ export default function EmployeesPage() {
 
   async function handleAddEmployee() {
     if (!newEmployee.name.trim()) return;
-    await createEmployee({
-      name:        newEmployee.name.trim(),
-      role:        newEmployee.role.trim(),
-      jobTitle:    newEmployee.jobTitle.trim(),
-      hourlyWage:  newEmployee.payrollType === "hourly" ? newEmployee.hourlyWage : 0,
-      dailyWage:   newEmployee.payrollType !== "hourly" ? newEmployee.dailyWage  : 0,
-      payrollType: newEmployee.payrollType,
-      pin:         newEmployee.pin || "0000",
-      permissions: newEmployee.permissions,
-    } as Parameters<typeof createEmployee>[0]);
+    setAddEmployeeError(null);
+    try {
+      await createEmployee({
+        name:        newEmployee.name.trim(),
+        role:        newEmployee.role.trim(),
+        jobTitle:    newEmployee.jobTitle.trim(),
+        hourlyWage:  newEmployee.payrollType === "hourly" ? newEmployee.hourlyWage : 0,
+        dailyWage:   newEmployee.payrollType !== "hourly" ? newEmployee.dailyWage  : 0,
+        payrollType: newEmployee.payrollType,
+        pin:         newEmployee.pin || "0000",
+        permissions: newEmployee.permissions,
+      } as Parameters<typeof createEmployee>[0]);
+    } catch (e) {
+      setAddEmployeeError((e as Error).message);
+    }
     setNewEmployee({ name: "", role: "", jobTitle: "", hourlyWage: 15, dailyWage: 0, payrollType: "hourly", pin: "", permissions: { ...DEFAULT_PERMISSIONS } });
     setSuggestExplanation("");
     setShowAddEmployee(false);
     load();
   }
 
+  function handleOpenEdit(emp: Employee) {
+    const perms = (emp.permissions as EmployeePermissions | null) ?? { ...DEFAULT_PERMISSIONS };
+    setEditForm({
+      name:        emp.name,
+      role:        emp.role ?? "",
+      jobTitle:    emp.jobTitle ?? "",
+      hourlyWage:  emp.hourlyWage ?? 15,
+      dailyWage:   Number(emp.dailyWage ?? 0),
+      payrollType: (emp.payrollType as "hourly" | "daily" | "salary") ?? "hourly",
+      pin:         emp.pin ?? "",
+      permissions: { ...DEFAULT_PERMISSIONS, ...perms },
+    });
+    setEditingEmployee(emp);
+  }
+
+  async function handleSaveEdit() {
+    if (!editingEmployee || !editForm.name.trim()) return;
+    setEditSaving(true);
+    try {
+      await updateEmployee(editingEmployee.id, {
+        name:        editForm.name.trim(),
+        role:        editForm.role.trim(),
+        jobTitle:    editForm.jobTitle.trim(),
+        hourlyWage:  editForm.payrollType === "hourly" ? editForm.hourlyWage : 0,
+        dailyWage:   editForm.payrollType !== "hourly" ? editForm.dailyWage  : 0,
+        payrollType: editForm.payrollType,
+        pin:         editForm.pin || "0000",
+        permissions: editForm.permissions,
+      });
+      setEditingEmployee(null);
+      load();
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   async function suggestPermissions(jobTitle: string) {
     if (!jobTitle.trim()) return;
     setSuggestingPermissions(true);
     try {
-      const res = await fetch("/api/store/employees/suggest-permissions", {
+      const res = await fetch("/api/storehub/employees/suggest-permissions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobTitle }),
@@ -382,15 +443,29 @@ export default function EmployeesPage() {
   }
 
   async function handleClockIn(emp: Employee) {
-    const existing = await getActiveShift(emp.id);
-    if (existing) return;
+    // Check local state first (avoids the 200-limit API query missing an old active shift)
+    const alreadyActive = shifts.some((s) => s.employeeId === emp.id && s.shiftEnd === null);
+    if (alreadyActive) return;
     await clockIn(emp.id, emp.name);
     load();
   }
 
   async function handleClockOut(shiftId: string) {
-    await clockOut(shiftId);
-    load();
+    const shift = shifts.find((s) => s.id === shiftId);
+    if (!shift) return;
+    const endTime = new Date().toISOString();
+
+    // Find every active shift for this employee — duplicates included
+    const allActive = shifts.filter((s) => s.employeeId === shift.employeeId && s.shiftEnd === null);
+
+    // Immediately clear all of them from UI so the timer stops right away
+    setShifts((prev) => prev.map((s) =>
+      s.employeeId === shift.employeeId && s.shiftEnd === null ? { ...s, shiftEnd: endTime } : s
+    ));
+
+    // Clock out every active shift on the server
+    await Promise.all(allActive.map((s) => clockOut(s)));
+    await load();
   }
 
   async function handleLogShift() {
@@ -469,6 +544,12 @@ export default function EmployeesPage() {
 
       <EmployeePortalBanner />
 
+      {addEmployeeError && (
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl px-4 py-3 text-sm text-red-700 dark:text-red-400">
+          Failed to save employee: {addEmployeeError}
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center text-gray-400 py-12 text-sm">Loading...</div>
       ) : employees.length === 0 ? (
@@ -493,6 +574,7 @@ export default function EmployeesPage() {
               onLogShift={openLogShift}
               onRecordDay={openRecordDay}
               onDelete={(id) => setDeleteConfirm(id)}
+              onEdit={handleOpenEdit}
               onClockIn={handleClockIn}
               onClockOut={handleClockOut}
             />
@@ -726,6 +808,117 @@ export default function EmployeesPage() {
             <div className="px-6 pb-6 flex gap-3 flex-shrink-0 border-t border-gray-100 dark:border-gray-700 pt-4">
               <button onClick={() => { setShowAddEmployee(false); setSuggestExplanation(""); }} className="flex-1 border border-gray-300 rounded-xl py-3 text-sm font-semibold text-gray-600">{t.common.cancel}</button>
               <button onClick={handleAddEmployee} disabled={!newEmployee.name.trim()} className="flex-[2] bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-xl py-3 text-sm transition-colors">{t.common.save}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Employee Modal */}
+      {editingEmployee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
+              <h2 className="font-bold text-gray-800 dark:text-gray-100">Edit Employee</h2>
+              <button onClick={() => setEditingEmployee(null)} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"><X size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Name</label>
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm(p => ({ ...p, name: e.target.value }))}
+                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Role</label>
+                  <input
+                    type="text"
+                    value={editForm.role}
+                    onChange={(e) => setEditForm(p => ({ ...p, role: e.target.value }))}
+                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                    placeholder="Cashier, Manager…"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Pay Type</label>
+                  <select
+                    value={editForm.payrollType}
+                    onChange={(e) => setEditForm(p => ({ ...p, payrollType: e.target.value as "hourly" | "daily" | "salary" }))}
+                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                  >
+                    <option value="hourly">Hourly</option>
+                    <option value="daily">Daily</option>
+                    <option value="salary">Salary</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+                    {editForm.payrollType === "hourly" ? "Hourly Wage" : "Daily Wage"}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editForm.payrollType === "hourly" ? editForm.hourlyWage : editForm.dailyWage}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value) || 0;
+                      setEditForm(p => editForm.payrollType === "hourly" ? { ...p, hourlyWage: v } : { ...p, dailyWage: v });
+                    }}
+                    className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Portal PIN (4 digits)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={editForm.pin}
+                  onChange={(e) => setEditForm(p => ({ ...p, pin: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
+                  className="w-full border border-gray-200 dark:border-gray-600 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 dark:bg-gray-700 dark:text-gray-100 tracking-widest text-center"
+                  placeholder="0000"
+                />
+              </div>
+
+              {/* Permissions */}
+              <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <ShieldCheck size={15} className="text-amber-600" />
+                  <span className="text-sm font-bold text-gray-700 dark:text-gray-200">Permissions</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {PERMISSION_KEYS.map((key) => {
+                    const enabled = editForm.permissions[key];
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setEditForm(p => ({ ...p, permissions: { ...p.permissions, [key]: !p.permissions[key] } }))}
+                        className={`flex items-center justify-between px-2.5 py-2 rounded-xl border-2 text-xs font-semibold transition-all ${
+                          enabled
+                            ? "border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-600"
+                            : "border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
+                        }`}
+                      >
+                        <span className="truncate">{PERMISSION_LABELS[key]}</span>
+                        <span className="ml-1 flex-shrink-0">{enabled ? "✓" : "✗"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="px-6 pb-6 flex gap-3 flex-shrink-0 border-t border-gray-100 dark:border-gray-700 pt-4">
+              <button onClick={() => setEditingEmployee(null)} className="flex-1 border border-gray-300 rounded-xl py-3 text-sm font-semibold text-gray-600">Cancel</button>
+              <button onClick={handleSaveEdit} disabled={!editForm.name.trim() || editSaving} className="flex-[2] bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold rounded-xl py-3 text-sm transition-colors">
+                {editSaving ? "Saving…" : "Save Changes"}
+              </button>
             </div>
           </div>
         </div>

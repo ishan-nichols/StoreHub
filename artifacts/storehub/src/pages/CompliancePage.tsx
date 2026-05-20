@@ -38,6 +38,7 @@ import {
   type ComplianceCategory,
 } from "../services/complianceService";
 import { useApp } from "../contexts/useApp";
+import { useAuth } from "../contexts/AuthContext";
 
 // ─── Icons per category ────────────────────────────────────────────────────────
 
@@ -254,8 +255,7 @@ const DEFAULT_FORM: FormData = {
 // ─── CompliancePage ────────────────────────────────────────────────────────────
 
 export default function CompliancePage() {
-  const { profile } = useApp();
-  const country = (profile?.country as "US" | "CA" | "MX") ?? "US";
+  const { profile } = useApp();  const { activeStoreId } = useAuth();  const country = (profile?.country as "US" | "CA" | "MX") ?? "US";
   const regionCode = profile?.stateCode ? `${country}-${profile.stateCode}` : undefined;
 
   const [items, setItems] = useState<ComplianceItem[]>([]);
@@ -277,7 +277,7 @@ export default function CompliancePage() {
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [activeStoreId]);
 
   async function handleAutoSetup() {
     if (!profile) return;

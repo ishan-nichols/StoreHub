@@ -6,6 +6,9 @@ interface Props {
   className?: string;
   placeholder?: string;
   autoFocus?: boolean;
+  readOnly?: boolean;
+  inputMode?: React.InputHTMLAttributes<HTMLInputElement>["inputMode"];
+  onFocus?: () => void;
   onBlur?: () => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
@@ -21,6 +24,9 @@ export default function CurrencyInput({
   className,
   placeholder = "0.00",
   autoFocus,
+  readOnly,
+  inputMode,
+  onFocus,
   onBlur,
   onKeyDown,
 }: Props) {
@@ -42,8 +48,15 @@ export default function CurrencyInput({
 
   const numericValue = parseInt(digits || "0") / 100;
   const displayValue = (focused || digits) ? numericValue.toFixed(2) : "";
+  const effectiveInputMode = inputMode || "decimal";
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (readOnly) {
+      e.preventDefault();
+      onKeyDown?.(e);
+      return;
+    }
+
     if (e.key >= "0" && e.key <= "9") {
       e.preventDefault();
       const appended = (digits + e.key).replace(/^0+/, "");
@@ -56,23 +69,25 @@ export default function CurrencyInput({
       setDigits(next);
       onChange(parseInt(next || "0") / 100);
     }
+
     onKeyDown?.(e);
   }
 
   return (
     <input
       type="text"
-      inputMode="decimal"
+      inputMode={effectiveInputMode}
       value={displayValue}
       placeholder={placeholder}
       autoFocus={autoFocus}
       className={className}
-      readOnly={false}
+      readOnly={readOnly ?? false}
       onFocus={() => {
         setFocused(true);
         const cents = Math.round(Math.abs(value) * 100);
         setDigits(cents === 0 ? "" : String(cents));
         lastValueRef.current = value;
+        onFocus?.();
       }}
       onBlur={() => {
         setFocused(false);

@@ -20,6 +20,9 @@ import customersRouter from "./customers/index.js";
 import supplierIntelligenceRouter from "./suppliers/intelligence.js";
 import voiceRouter from "./voice/index.js";
 import portalRouter from "./portal/index.js";
+import inviteRouter from "./auth/invite.js";
+import sessionsRouter from "./auth/sessions.js";
+import mfaRouter from "./auth/mfa.js";
 
 const router: IRouter = Router();
 
@@ -31,7 +34,7 @@ router.use("/auth",                   authRouter);
 router.use("/barcode",                barcodeRouter);
 router.use("/upc",                    upcRouter);
 router.use("/square",                 squareRouter);
-router.use("/store",                  storehubRouter);
+router.use("/storehub",               storehubRouter);
 router.use("/admin",                  adminRouter);
 router.use("/businesses",             businessesRouter);
 router.use("/onboarding",             onboardingRouter);
@@ -44,5 +47,8 @@ router.use("/customers",              customersRouter);
 router.use("/suppliers",              supplierIntelligenceRouter);
 router.use("/voice",                  voiceRouter);
 router.use("/portal",                 portalRouter);
+router.use("/auth/invite",            inviteRouter);
+router.use("/auth/sessions",          sessionsRouter);
+router.use("/auth/mfa",               mfaRouter);
 
 export default router;

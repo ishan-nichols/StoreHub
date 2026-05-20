@@ -15,13 +15,18 @@ import LowMarginAlerts from "../components/LowMarginAlerts";
 import SmartTipsWidget from "../components/SmartTipsWidget";
 import RealProfitPanel from "../components/RealProfitPanel";
 import VoiceButton from "../components/VoiceButton";
-import { getDashboardSummary, getProducts, API_BASE_URL } from "../services/dataService";
-import type { DashboardSummary } from "../schemas";
+import { getDashboardSummary, getProducts, API_BASE_URL, getMonthCloseRecords } from "../services/dataService";
+import type { DashboardSummary, MonthCloseRecord } from "../schemas";
 import { formatCurrency, formatDateTime } from "../utils";
 
 const CHECKLIST_KEY = "storehub_checklist_dismissed";
-const REPORT_KEY = "storehub_ai_report";
+const REPORT_KEY_BASE = "storehub_ai_report";
 const REPORT_INTERVAL = 4 * 60 * 60 * 1000;
+
+function getReportKey() {
+  const activeStoreId = typeof window !== "undefined" ? sessionStorage.getItem("sh_active_store_id") : null;
+  return activeStoreId ? `${REPORT_KEY_BASE}_${activeStoreId}` : REPORT_KEY_BASE;
+}
 
 interface ReportCache {
   content: string;
@@ -31,7 +36,7 @@ interface ReportCache {
 
 function getReportCache(): ReportCache | null {
   try {
-    const raw = localStorage.getItem(REPORT_KEY);
+    const raw = localStorage.getItem(getReportKey());
     if (!raw) return null;
     const cache = JSON.parse(raw) as ReportCache;
     const age = Date.now() - new Date(cache.generatedAt).getTime();
@@ -42,7 +47,7 @@ function getReportCache(): ReportCache | null {
 }
 
 function setReportCache(content: string, weather: string) {
-  localStorage.setItem(REPORT_KEY, JSON.stringify({ content, weather, generatedAt: new Date().toISOString() }));
+  localStorage.setItem(getReportKey(), JSON.stringify({ content, weather, generatedAt: new Date().toISOString() }));
 }
 
 function timeAgo(dateStr: string) {
@@ -95,14 +100,16 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState<ReportCache | null>(null);
   const [reportGenerating, setReportGenerating] = useState(false);
+  const [monthCloseRecords, setMonthCloseRecords] = useState<MonthCloseRecord[]>([]);
   const [checklistDismissed, setChecklistDismissed] = useState(() => localStorage.getItem(CHECKLIST_KEY) === "1");
   const reportAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!profile) return;
-    Promise.all([getDashboardSummary(profile), getProducts()]).then(([dashboardSummary, products]) => {
+    Promise.all([getDashboardSummary(profile), getProducts(), getMonthCloseRecords()]).then(([dashboardSummary, products, closedMonths]) => {
       setSummary(dashboardSummary);
       setTotalProducts(products.length);
+      setMonthCloseRecords(closedMonths);
       setLoading(false);
 
       const cached = getReportCache();
@@ -242,6 +249,15 @@ export default function DashboardPage() {
   const stockOuts = profile?.stockOuts ?? [];
   const painPoints = profile?.painPoints ?? [];
 
+  const latestMonthClose = [...monthCloseRecords].sort((a, b) => new Date(b.closedAt).getTime() - new Date(a.closedAt).getTime())[0] ?? null;
+  const currentDate = new Date();
+  const currentMonthClosed = monthCloseRecords.some((record) => record.month === currentDate.getMonth() + 1 && record.year === currentDate.getFullYear());
+  const previousMonthDate = new Date(currentDate);
+  previousMonthDate.setMonth(previousMonthDate.getMonth() - 1);
+  const previousMonthClosed = monthCloseRecords.some((record) => record.month === previousMonthDate.getMonth() + 1 && record.year === previousMonthDate.getFullYear());
+  const previousMonthName = previousMonthDate.toLocaleString("default", { month: "long" });
+  const isPreviousMonthOverdue = !previousMonthClosed && currentDate.getDate() >= 20;
+
   const checklist = [
     totalProducts > 0 ? { text: "Add products to inventory", done: true } : { text: "Add your first product", done: false },
     summary.todaySalesCount > 0 ? { text: "Complete a sale in POS", done: true } : { text: "Make your first sale", done: false },
@@ -267,6 +283,7 @@ export default function DashboardPage() {
               <Pill text={`${totalProducts} products tracked`} />
               <Pill text={`${summary.lowStockProducts.length} low-stock alerts`} />
               <Pill text={`${summary.todaySalesCount} sales today`} />
+              <Pill text={currentMonthClosed ? "Current month is locked" : "Current month still open"} />
             </div>
           </div>
 
@@ -277,6 +294,32 @@ export default function DashboardPage() {
               <MiniMetric label="Profit today" value={formatCurrency(summary.todayProfit, currencySymbol)} tone={summary.todayProfit >= 0 ? "amber" : "rose"} />
               <MiniMetric label="Items needing attention" value={String(summary.lowStockProducts.length)} tone="stone" />
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className={`rounded-[32px] p-6 shadow-xl shadow-stone-900/10 md:px-7 ${previousMonthClosed ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200'}`}>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-700">Month-end close</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-stone-900">{previousMonthClosed ? 'Last month is locked' : 'Close last month to lock the books'}</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-700">
+              {previousMonthClosed
+                ? `Your ${previousMonthName} close is complete. View the locked month-end report for details.`
+                : isPreviousMonthOverdue
+                  ? `Your ${previousMonthName} close is overdue. Finish month-end reconciliation to keep your financials accurate.`
+                  : `It’s time to finish ${previousMonthName} with a month-end close. Reconcile cash, review expenses, and archive the monthly report.`}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <a href="/reports?tab=monthly" className="inline-flex items-center justify-center rounded-full bg-stone-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-stone-800">
+              Open monthly close
+            </a>
+            {latestMonthClose && (
+              <div className="rounded-full bg-white px-4 py-2 text-sm font-medium text-stone-900">
+                Last closed: {new Date(latestMonthClose.closedAt).toLocaleDateString()}
+              </div>
+            )}
           </div>
         </div>
       </section>

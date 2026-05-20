@@ -5,6 +5,7 @@ import {
   Receipt, Send, Settings, Sparkles, Users, Zap,
 } from "lucide-react";
 import { useApp } from "../contexts/useApp";
+import { useAuth } from "../contexts/AuthContext";
 import {
   type TaxProfile, type SalesTaxSummary, type IncomeTaxSummary,
   type PayrollTaxSummary, type TaxDashboard,
@@ -349,6 +350,7 @@ function TaxAdvisorChat({ taxData, country }: { taxData: Record<string, unknown>
 
 export default function TaxPage() {
   const { profile, currencySymbol } = useApp();
+  const { activeStoreId } = useAuth();
   const [tab, setTab]               = useState<Tab>("overview");
   const [taxProfile, setTaxProfile] = useState<TaxProfile | null>(null);
   const [showSetup, setShowSetup]   = useState(false);
@@ -366,7 +368,7 @@ export default function TaxPage() {
     setTaxProfile(tp);
     if (tp?.setupComplete) loadTaxData(tp);
     else setLoading(false);
-  }, []);
+  }, [activeStoreId]);
 
   async function loadTaxData(tp: TaxProfile) {
     setLoading(true);

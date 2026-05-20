@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../contexts/useApp";
+import { useAuth } from "../contexts/AuthContext";
 import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, getProducts } from "../services/dataService";
 import type { Supplier, InsertSupplier, Product } from "../schemas";
 import { Plus, Edit2, Trash2, X, Phone, Mail, Brain } from "lucide-react";
@@ -16,6 +17,7 @@ const emptyForm: InsertSupplier = {
 
 export default function SuppliersPage() {
   const { t } = useApp();
+  const { activeStoreId } = useAuth();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +34,7 @@ export default function SuppliersPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [activeStoreId]);
 
   function openAdd() {
     setForm(emptyForm);

@@ -3,3 +3,8 @@ export * from "./messages";
 export * from "./auth";
 export * from "./storehub";
 export * from "./analytics";
+export * from "./audit";
+export * from "./permissions";
+export * from "./invitations";
+export * from "./scheduling";
+export * from "./payroll";

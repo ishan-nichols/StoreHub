@@ -26,6 +26,10 @@ import {
   TrendingUp,
   UserCheck,
   ShieldCheck,
+  Banknote,
+  RotateCcw,
+  CalendarDays,
+  DollarSign,
 } from "lucide-react";
 
 interface NavItem {
@@ -36,22 +40,63 @@ interface NavItem {
   icon: React.ReactNode;
 }
 
+// Keys the employee is allowed to access (null = owner/manager, no restriction).
+function getEmployeePermissions(): Set<string> | null {
+  try {
+    const raw = sessionStorage.getItem("sh_employee_permissions");
+    if (!raw) return null;
+    const arr = JSON.parse(raw) as string[];
+    return new Set(arr);
+  } catch {
+    return null;
+  }
+}
+
+// Map route paths to permission keys (same keys as MODULE_CONFIG in portal).
+const PATH_PERMISSION: Record<string, string> = {
+  "/retail-pos":      "pos",
+  "/pos":             "pos",
+  "/inventory":       "inventory",
+  "/sales":           "sales",
+  "/expenses":        "expenses",
+  "/reports":         "reports",
+  "/suppliers":       "suppliers",
+  "/customers":       "customers",
+  "/cashflow":        "cashflow",
+  "/employees":       "employees",
+  "/tax":             "tax",
+  "/settings":        "settings",
+  "/cash-management": "pos",
+  "/refunds":         "pos",
+  "/payments":        "pos",
+  "/payroll":         "employees",
+  "/hr":              "employees",
+  "/schedule":        "employees",
+  "/compliance":      "tax",
+  "/automations":     "reports",
+  "/integrations":    "settings",
+};
+
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { profile, t, trackFeature, uiPreferences } = useApp();
   const { isSwitched, isBusinessOwner, isAdmin, activeStoreId, restoreBusiness } = useAuth();
   const isStoreView = (isBusinessOwner || isAdmin) && !!activeStoreId;
   const showStoreViewBanner = isSwitched || isStoreView;
 
+  // Re-read sessionStorage on every location change so SPA navigation picks up
+  // permissions set by the portal's onClick before the route transition.
+  const [location, setLocation] = useLocation();
+  const employeePerms = useMemo(() => getEmployeePermissions(), [location]);
+
   function handleExitStore() {
+    sessionStorage.removeItem("sh_employee_permissions");
     if (isAdmin) {
-      // Admin: clear activeStoreId and go back to admin panel
       sessionStorage.removeItem("sh_active_store_id");
       window.location.href = "/admin";
     } else {
       restoreBusiness();
     }
   }
-  const [location, setLocation] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const mainRef = useRef<HTMLElement | null>(null);
 
@@ -62,10 +107,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const baseItems: NavItem[] = [
     { key: "dashboard",    label: t.nav.dashboard,  note: "Daily pulse",          path: "/dashboard",    icon: <LayoutDashboard size={18} /> },
-    { key: "pos",          label: t.nav.pos,         note: "Fast checkout",        path: "/pos",          icon: <ShoppingCart size={18} /> },
+    ...(profile?.paymentsEnabled !== false ? [
+      { key: "pos",          label: t.nav.pos,         note: "Fast checkout",        path: "/retail-pos",          icon: <ShoppingCart size={18} /> },
+    ] : []),
     { key: "inventory",    label: t.nav.inventory,   note: "Products and stock",   path: "/inventory",    icon: <Package size={18} /> },
     { key: "sales",        label: t.nav.sales,       note: "Orders and receipts",  path: "/sales",        icon: <Receipt size={18} /> },
     { key: "expenses",     label: t.nav.expenses,    note: "Money going out",      path: "/expenses",     icon: <Wallet size={18} /> },
+    ...(profile?.paymentsEnabled !== false ? [
+      { key: "cash-management", label: "Cash Management", note: "Shifts & reconciliation", path: "/cash-management", icon: <Banknote size={18} /> },
+      { key: "refunds",         label: "Refunds",         note: "Returns & refunds",      path: "/refunds",         icon: <RotateCcw size={18} /> },
+    ] : []),
     { key: "reports",      label: "Reports",         note: "What is changing",     path: "/reports",      icon: <BarChart2 size={18} /> },
     { key: "automations",  label: "Automations",     note: "Work on autopilot",    path: "/automations",  icon: <Zap size={18} /> },
     { key: "integrations", label: "Integrations",    note: "Connect tools",        path: "/integrations", icon: <Plug size={18} /> },
@@ -74,11 +125,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { key: "customers",    label: "Customers",       note: "Loyalty & intelligence", path: "/customers",  icon: <UserCheck size={18} /> },
     { key: "compliance",   label: "Compliance",      note: "Licenses & deadlines", path: "/compliance",   icon: <ShieldCheck size={18} /> },
     { key: "suppliers",    label: t.nav.suppliers,   note: "Vendors and deliveries", path: "/suppliers",  icon: <Truck size={18} /> },
-    { key: "employees", label: t.nav.employees, note: "Team access", path: "/employees", icon: <Users size={18} /> },
+    { key: "employees", label: t.nav.employees, note: "Team access",       path: "/employees", icon: <Users size={18} /> },
+    { key: "schedule",  label: "Schedule",       note: "Shifts & availability", path: "/schedule",  icon: <CalendarDays size={18} /> },
+    { key: "payroll",   label: "Payroll",        note: "Pay runs & payslips",   path: "/payroll",   icon: <DollarSign size={18} /> },
+    { key: "hr",        label: "HR & Access",    note: "Time off & access rules", path: "/hr",      icon: <ShieldCheck size={18} /> },
     { key: "settings",     label: t.nav.settings,    note: "Store preferences",    path: "/settings",     icon: <Settings size={18} /> },
   ];
 
   const navItems = useMemo(() => {
+    // If this is an employee session, filter to only their allowed pages.
+    const filtered = employeePerms
+      ? baseItems.filter((item) => {
+          const requiredPerm = PATH_PERMISSION[item.path];
+          return !requiredPerm || employeePerms.has(requiredPerm);
+        })
+      : baseItems;
+
     const priorityKeys: string[] = [];
     if (goal === "profit" || goal === "numbers" || painPoints.includes("profits") || painPoints.includes("numbers")) {
       priorityKeys.push("reports");
@@ -86,13 +148,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if ((goal === "team" || painPoints.includes("employees")) && showEmployees) priorityKeys.push("employees");
     if (goal === "reorder" || painPoints.includes("reorder")) priorityKeys.push("inventory");
     if (painPoints.includes("suppliers")) priorityKeys.push("suppliers");
-    if (priorityKeys.length === 0) return baseItems;
+    if (priorityKeys.length === 0) return filtered;
 
-    const pinned = priorityKeys.map((key) => baseItems.find((item) => item.key === key)).filter(Boolean) as NavItem[];
-    const rest = baseItems.filter((item) => !priorityKeys.includes(item.key));
+    const pinned = priorityKeys.map((key) => filtered.find((item) => item.key === key)).filter(Boolean) as NavItem[];
+    const rest = filtered.filter((item) => !priorityKeys.includes(item.key));
     const dashboard = rest.shift();
     return dashboard ? [dashboard, ...pinned, ...rest] : [...pinned, ...rest];
-  }, [baseItems, goal, showEmployees, painPoints]);
+  }, [baseItems, goal, showEmployees, painPoints, employeePerms]);
+
+  // Redirect employee to portal if they navigate directly to a forbidden page.
+  useEffect(() => {
+    if (!employeePerms) return;
+    const requiredPerm = PATH_PERMISSION[location] ??
+      Object.entries(PATH_PERMISSION).find(([p]) => location.startsWith(p))?.[1];
+    if (requiredPerm && !employeePerms.has(requiredPerm)) {
+      setLocation("/employee");
+    }
+  }, [location, employeePerms]);
 
   const activeItem = navItems.find((item) => location.startsWith(item.path)) ?? navItems[0];
   const storeName = profile?.storeName || "StoreHub";

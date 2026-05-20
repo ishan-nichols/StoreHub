@@ -107,11 +107,17 @@ function RetailInventoryPage() {
   ];
 
   async function load() {
-    const [productList, supplierList, settings] = await Promise.all([getProducts(), getSuppliers(), getCategorySettings()]);
-    setProducts(productList);
-    setSuppliers(supplierList);
-    setCategorySettings(settings);
-    setLoading(false);
+    try {
+      const [productList, supplierList, settings] = await Promise.all([getProducts(), getSuppliers(), getCategorySettings()]);
+      console.log("Inventory load: got", productList.length, "products");
+      setProducts(productList);
+      setSuppliers(supplierList);
+      setCategorySettings(settings);
+    } catch (error) {
+      console.error("Failed to load inventory data:", error);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -141,9 +147,8 @@ function RetailInventoryPage() {
     if (!inlineEdit) return;
     const num = parseFloat(inlineEdit.value);
     if (isNaN(num) || num < 0) { setInlineEdit(null); return; }
-    await updateProduct(inlineEdit.productId, { [inlineEdit.field]: num });
-    await load();
     setInlineEdit(null);
+    await updateProduct(inlineEdit.productId, { [inlineEdit.field]: num });
   }
 
   async function saveCategorySetting() {
@@ -225,16 +230,14 @@ function RetailInventoryPage() {
 
   async function handleSave() {
     if (!form.name.trim()) return;
+    setShowForm(false);
     if (editingId) await updateProduct(editingId, form);
     else await createProduct(form);
-    setShowForm(false);
-    await load();
   }
 
   async function handleDelete(id: string) {
-    await deleteProduct(id);
     setDeleteConfirm(null);
-    await load();
+    await deleteProduct(id);
   }
 
   function statusBadge(product: Product) {

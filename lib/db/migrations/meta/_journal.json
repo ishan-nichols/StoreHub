@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1778949566654,
+      "tag": "0000_add_loyalty_transactions",
+      "breakpoints": true
+    }
+  ]
+}

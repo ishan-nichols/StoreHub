@@ -1,11 +1,11 @@
 import { Router, type IRouter } from "express";
-import { eq, and, sql, gte, lte, sum, inArray } from "drizzle-orm";
+import { eq, and, sql, gte, lte, sum, inArray, ne } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   storeProfiles, products, sales, expenses, suppliers,
   employees, shifts, recurringExpenses, scheduledPriceChanges,
   ingredients, recipes, recipeIngredients, menuItems,
-  dailyPayRecords,
+  dailyPayRecords, refunds,
 } from "@workspace/db";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import { buildCrudRouter } from "./crud.js";
@@ -13,6 +13,11 @@ import salesTaxRouter from "./salesTax.js";
 import locationsRouter from "./locations.js";
 import supplierIntelligenceRouter from "../suppliers/index.js";
 import employeePermissionsRouter from "./employee-permissions.js";
+import schedulesRouter from "./schedules.js";
+import payrollRouter from "./payroll.js";
+import rolesRouter from "./roles.js";
+import auditRouter from "./audit.js";
+import { resolvePermissions } from "../../lib/rbac.js";
 
 const router: IRouter = Router();
 
@@ -49,13 +54,58 @@ router.use("/profile", profileRouter);
 router.use("/sales-tax", salesTaxRouter);
 router.use("/locations", locationsRouter);
 router.use("/supplier-intelligence", supplierIntelligenceRouter);
+router.use("/schedules", schedulesRouter);
+router.use("/payroll", payrollRouter);
+router.use("/roles", rolesRouter);
+router.use("/audit-logs", auditRouter);
 
 // ─── Standard per-user collections via factory ─────────────────────────────
 router.use("/products",           buildCrudRouter({ table: products,              userIdCol: products.userId,              idCol: products.id,              orderByCol: products.createdAt }));
 router.use("/sales",              buildCrudRouter({ table: sales,                 userIdCol: sales.userId,                 idCol: sales.id,                 orderByCol: sales.createdAt }));
+router.use("/refunds",            buildCrudRouter({ table: refunds,               userIdCol: refunds.userId,               idCol: refunds.id,               orderByCol: refunds.createdAt }));
 router.use("/expenses",           buildCrudRouter({ table: expenses,              userIdCol: expenses.userId,              idCol: expenses.id,              orderByCol: expenses.date }));
 router.use("/suppliers",          buildCrudRouter({ table: suppliers,             userIdCol: suppliers.userId,             idCol: suppliers.id,             orderByCol: suppliers.createdAt }));
 router.use("/employees",          employeePermissionsRouter);
+
+// GET /api/store/employees/me/permissions — returns the calling employee's resolved permissions
+router.get("/employees/me/permissions", requireAuth, async (req, res) => {
+  try {
+    // For store owners and admins, return all permissions granted
+    if (req.userRole === "store_owner" || req.userRole === "superadmin" || req.userRole === "business_owner") {
+      // Dynamically import ALL_PERMISSIONS to avoid circular dependency
+      const { ALL_PERMISSIONS } = await import("../../lib/rbac.js");
+      const all = Object.fromEntries(ALL_PERMISSIONS.map((p) => [p, true]));
+      return res.json({ permissions: all, role: req.userRole });
+    }
+    // For employees: look up their employee record then resolve permissions
+    const [emp] = await db
+      .select({ id: employees.id, permissions: employees.permissions })
+      .from(employees)
+      .where(eq(employees.userId, req.userId!))
+      .limit(1);
+
+    if (!emp) return res.json({ permissions: {}, role: "employee" });
+
+    const resolved = await resolvePermissions(emp.id, req.userId!);
+    return res.json({ permissions: resolved, role: "employee", legacy: emp.permissions });
+  } catch (err) {
+    return res.status(500).json({ error: "Failed to resolve permissions" });
+  }
+});
+
+// PIN uniqueness check — runs before the CRUD router for mutating requests only.
+router.use("/employees", requireAuth, async (req: any, res: any, next: any) => {
+  if (req.method !== "POST" && req.method !== "PATCH") return next();
+  const pin = req.body?.pin;
+  if (!pin) return next();
+  const employeeId = req.path.length > 1 ? req.path.slice(1) : undefined; // strip leading /
+  const whereClause = employeeId
+    ? and(eq(employees.userId, req.userId!), eq(employees.pin, String(pin)), ne(employees.id, employeeId))
+    : and(eq(employees.userId, req.userId!), eq(employees.pin, String(pin)));
+  const [conflict] = await db.select({ name: employees.name }).from(employees).where(whereClause).limit(1);
+  if (conflict) return res.status(409).json({ error: `PIN ${pin} is already used by "${conflict.name}". Each employee must have a unique PIN.` });
+  return next();
+});
 router.use("/employees",          buildCrudRouter({ table: employees,             userIdCol: employees.userId,             idCol: employees.id,             orderByCol: employees.createdAt }));
 router.use("/shifts",             buildCrudRouter({ table: shifts,                userIdCol: shifts.userId,                idCol: shifts.id,                orderByCol: shifts.shiftStart }));
 router.use("/recurring-expenses", buildCrudRouter({ table: recurringExpenses,     userIdCol: recurringExpenses.userId,     idCol: recurringExpenses.id,     orderByCol: recurringExpenses.createdAt }));

@@ -18,6 +18,88 @@ export type ContrastLevel = "standard" | "enhanced" | "high";
 export type TypographyWeight = "light" | "regular" | "medium" | "bold";
 export type SpacingDensity = "compact" | "comfortable" | "spacious" | "airy";
 
+export interface CardReader {
+  id: string;
+  type?:
+    | "stripe_s700"
+    | "stripe_m2"
+    | "square_reader"
+    | "square_terminal"
+    | "clover_mini"
+    | "clover_flex"
+    | "clover_go"
+    | "verifone_p400"
+    | "ingenico_lane3000"
+    | "pax_a920"
+    | "generic_bluetooth"
+    | "generic_usb"
+    | "generic_wifi";
+  brand: "stripe" | "square" | "clover" | "verifone" | "ingenico" | "pax" | "generic";
+  model: string;
+  serialNumber?: string;
+  connectionType?: "bluetooth" | "usb" | "wifi";
+  connection?: "bluetooth" | "usb" | "wifi";
+  status: "connected" | "disconnected" | "pairing";
+  lastSeen: string;
+  lastConnected?: string;
+  pairedAt?: string;
+  isPrimary?: boolean;
+  processor?: "stripe" | "square";
+}
+
+export interface CashShift {
+  id: string;
+  date: string;
+  openedAt: string;
+  closedAt?: string;
+  openingFloat: number;
+  cashIn: number;
+  cashOut: number;
+  countedClose?: number;
+  variance?: number;
+  employeeId?: string;
+}
+
+export interface MonthCloseRecord {
+  id: string;
+  month: number;
+  year: number;
+  closedAt: string;
+  notes: string;
+  completedSteps: string[];
+  revenue: number;
+  expenses: number;
+  profit: number;
+  supplierSpending: number;
+  shrinkage: number;
+  cashVariance: number;
+  createdAt: string;
+}
+
+export interface Refund {
+  id: string;
+  saleId: string;
+  items: { productId: string; productName: string; quantity: number; price: number }[];
+  amount: number;
+  reason: "damaged" | "wrong_item" | "customer_changed_mind" | "other";
+  reasonNote?: string;
+  paymentMethod: string;
+  createdAt: string;
+  employeeId?: string;
+}
+
+export interface PaymentFeatureSettings {
+  paymentsEnabled: boolean;
+  stripeConnected: boolean;
+  squareConnected: boolean;
+  connectedReader: CardReader | null;
+  receiptHeader: string;
+  receiptFooter: string;
+  managerPinRequired: boolean;
+  managerPinThreshold: number;
+  openingFloat: number;
+}
+
 export interface OpeningHours {
   open: string;
   close: string;
@@ -130,6 +212,11 @@ export interface UserProfile {
 
   // Universal (replaces storeSize)
   staffCount?: "solo" | "small" | "medium" | "multi";
+
+  // ── Payment System ─────────────────────────────────────────────────────────
+  paymentMethod?: string;
+  paymentsEnabled?: boolean;
+  paymentSettings?: PaymentFeatureSettings;
 }
 
 export type PosSyncStatus = "synced" | "pending" | "failed" | "not_connected";
@@ -207,6 +294,11 @@ export interface Sale {
   total: number;
   amountPaid: number;
   change: number;
+  paymentMethod?: string;
+  customerId?: string;
+  customerPhone?: string;
+  customerName?: string;
+  loyaltyPointsUsed?: number;
   createdAt: string;
   receiptNumber: string;
   note: string;
@@ -376,3 +468,6 @@ export interface RecurringExpense {
 }
 
 export type InsertRecurringExpense = Omit<RecurringExpense, "id" | "createdAt">;
+
+export type InsertCashShift = Omit<CashShift, "id">;
+export type InsertRefund = Omit<Refund, "id" | "createdAt">;

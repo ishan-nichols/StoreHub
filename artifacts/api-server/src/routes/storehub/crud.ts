@@ -76,8 +76,20 @@ export function buildCrudRouter(opts: CrudTable): IRouter {
   router.patch("/:id", async (req, res) => {
     const id = req.params.id;
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const { id: _i, userId: _u, createdAt: _c, ...patch } = body;
+    const { id: _i, userId: _u, createdAt: _c, ...rawPatch } = body;
     void _i; void _u; void _c;
+
+    // Drizzle's PgTimestamp.mapToDriverValue expects a Date, but JSON bodies send ISO strings.
+    // Convert any ISO date string to a Date object so Drizzle can serialise it properly.
+    const tableColumns: Record<string, any> = (table as any)[Symbol.for("drizzle:Columns")] ?? {};
+    const patch = Object.fromEntries(
+      Object.entries(rawPatch).map(([k, v]) => {
+        const col = tableColumns[k];
+        if (col?.dataType === "date" && typeof v === "string") return [k, new Date(v)];
+        return [k, v];
+      }),
+    );
+
     try {
       const whereClause = buildWhereClause(req.userId!, req.userRole, req.businessId);
       let query = (db as any).update(table).set(patch).where(eq(idCol, id));

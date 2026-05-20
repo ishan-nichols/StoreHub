@@ -1,9 +1,10 @@
 import { Router } from "express";
-import { eq, and, desc, lt, sql } from "drizzle-orm";
+import { eq, and, desc, lt, or, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { customers, sales } from "@workspace/db/schema";
+import { customers, sales, loyaltyTransactions } from "@workspace/db/schema";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import Anthropic from "@anthropic-ai/sdk";
+
 
 const router = Router();
 router.use(requireAuth);
@@ -140,14 +141,19 @@ router.get("/:id", async (req, res) => {
       return;
     }
 
-    const history = customer.phone
-      ? await db
-          .select()
-          .from(sales)
-          .where(and(eq(sales.userId, req.userId!), eq(sales.customerPhone, customer.phone)))
-          .orderBy(desc(sales.createdAt))
-          .limit(50)
-      : [];
+    const history = await db
+      .select()
+      .from(sales)
+      .where(
+        and(
+          eq(sales.userId, req.userId!),
+          customer.phone
+            ? or(eq(sales.customerId, req.params.id), eq(sales.customerPhone, customer.phone))
+            : eq(sales.customerId, req.params.id),
+        ),
+      )
+      .orderBy(desc(sales.createdAt))
+      .limit(50);
 
     res.json({
       ...customer,
@@ -162,12 +168,15 @@ router.get("/:id", async (req, res) => {
 // ─── PATCH /:id — update customer ────────────────────────────────────────────
 
 router.patch("/:id", async (req, res) => {
-  const { name, phone, email, notes, loyaltyPoints } = req.body as {
+  const { name, phone, email, notes, loyaltyPoints, totalSpent, visitCount, lastVisitAt } = req.body as {
     name?: string;
     phone?: string;
     email?: string;
     notes?: string;
     loyaltyPoints?: number;
+    totalSpent?: number;
+    visitCount?: number;
+    lastVisitAt?: string;
   };
   try {
     const patch: Partial<typeof customers.$inferInsert> = {};
@@ -176,6 +185,14 @@ router.patch("/:id", async (req, res) => {
     if (email !== undefined) patch.email = email.trim() || null;
     if (notes !== undefined) patch.notes = notes.trim() || null;
     if (loyaltyPoints !== undefined) patch.loyaltyPoints = loyaltyPoints;
+    if (typeof totalSpent === "number") patch.totalSpent = totalSpent;
+    if (typeof visitCount === "number") patch.visitCount = visitCount;
+    if (typeof lastVisitAt === "string") patch.lastVisitAt = new Date(lastVisitAt);
+
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ error: "No customer values provided for update" });
+      return;
+    }
 
     const [row] = await db
       .update(customers)
@@ -314,6 +331,94 @@ Generate a short, warm personalized offer for this customer. Include their name,
       message.content[0].type === "text" ? message.content[0].text : "Thank you for being a valued customer!";
 
     res.json({ offer });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+});
+
+// ─── POST /:id/log-transaction — log loyalty transaction ──────────────────────
+
+router.post("/:id/log-transaction", async (req, res) => {
+  const {
+    type,
+    pointsChange,
+    saleAmount,
+    rewardUsed,
+    saleId,
+    notes,
+    metadata,
+  } = req.body as {
+    type?: string; // 'earn', 'redeem', 'reward_unlock', 'admin_adjust'
+    pointsChange?: number;
+    saleAmount?: number;
+    rewardUsed?: string;
+    saleId?: string;
+    notes?: string;
+    metadata?: Record<string, any>;
+  };
+
+  if (!type || typeof pointsChange !== "number") {
+    res.status(400).json({ error: "type and pointsChange are required" });
+    return;
+  }
+
+  try {
+    // Get current customer balance
+    const [customer] = await db
+      .select({ loyaltyPoints: customers.loyaltyPoints })
+      .from(customers)
+      .where(and(eq(customers.id, req.params.id), eq(customers.userId, req.userId!)));
+
+    if (!customer) {
+      res.status(404).json({ error: "Customer not found" });
+      return;
+    }
+
+    const pointsBalanceBefore = customer.loyaltyPoints;
+    const pointsBalanceAfter = pointsBalanceBefore + pointsChange;
+
+    if (type === "redeem" && pointsBalanceAfter < 0) {
+      res.status(400).json({ error: "Insufficient loyalty points" });
+      return;
+    }
+
+    let updatedCustomer = customer;
+    if (type === "earn" || type === "redeem" || type === "admin_adjust") {
+      const [row] = await db
+        .update(customers)
+        .set({ loyaltyPoints: sql`${customers.loyaltyPoints} + ${pointsChange}` })
+        .where(and(eq(customers.id, req.params.id), eq(customers.userId, req.userId!)))
+        .returning();
+
+      if (!row) {
+        res.status(404).json({ error: "Customer not found" });
+        return;
+      }
+      updatedCustomer = row;
+    }
+
+    // Log the transaction
+    const [transaction] = await db
+      .insert(loyaltyTransactions)
+      .values({
+        userId: req.userId!,
+        customerId: req.params.id,
+        type,
+        pointsChange,
+        pointsBalanceBefore,
+        pointsBalanceAfter,
+        saleAmount,
+        rewardUsed,
+        saleId,
+        notes,
+        metadata: metadata || {},
+      })
+      .returning();
+
+    res.status(201).json({
+      transaction,
+      customerBalanceAfter: updatedCustomer.loyaltyPoints,
+    });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }

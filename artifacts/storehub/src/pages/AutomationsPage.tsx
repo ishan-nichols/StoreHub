@@ -18,6 +18,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useApp } from "../contexts/useApp";
+import { useAuth } from "../contexts/AuthContext";
 import { PageHero, SectionTitle, SummaryTile, SurfaceCard } from "../components/page-shell";
 import {
   calcNextDue,
@@ -53,6 +54,7 @@ const EMPTY_FORM: InsertRecurringExpense = {
 
 export default function AutomationsPage() {
   const { profile } = useApp();
+  const { activeStoreId } = useAuth();
   const currencySymbol = getCurrencySymbol(profile?.currency ?? "USD");
   const fmt = (n: number) => formatCurrency(n, currencySymbol);
 
@@ -82,7 +84,7 @@ export default function AutomationsPage() {
     const todayStr = new Date().toISOString().split("T")[0];
     setTodaySales(sales.filter((sale) => sale.createdAt.startsWith(todayStr)));
     setTodayExpenses(expenses.filter((exp) => exp.date === todayStr));
-  }, []);
+  }, [activeStoreId]);
 
   useEffect(() => {
     void load();

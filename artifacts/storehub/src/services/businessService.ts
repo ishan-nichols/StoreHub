@@ -109,9 +109,90 @@ export async function updateBusiness(
 
 // ── Store stats ───────────────────────────────────────────────────────────────
 
+function localEmployeeCount(storeUserId: string): number {
+  try {
+    const raw = localStorage.getItem(`storehub_employees_${storeUserId}`);
+    if (!raw) return 0;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.length : 0;
+  } catch { return 0; }
+}
+
+function localSalesRevenue(storeUserId: string): number {
+  try {
+    const raw = localStorage.getItem(`storehub_sales_${storeUserId}`);
+    if (!raw) return 0;
+    const arr: Array<{ total?: number }> = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.reduce((s, r) => s + (r.total ?? 0), 0) : 0;
+  } catch { return 0; }
+}
+
+function localProductCount(storeUserId: string): number {
+  try {
+    const raw = localStorage.getItem(`storehub_products_${storeUserId}`);
+    if (!raw) return 0;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.length : 0;
+  } catch { return 0; }
+}
+
 /** Full per-store breakdown with aggregated totals. */
 export async function getBusinessStats(businessId: string): Promise<BusinessStats> {
-  return apiJson<BusinessStats>(`/api/businesses/${businessId}/stats`);
+  let stats: BusinessStats;
+  try {
+    stats = await apiJson<BusinessStats>(`/api/businesses/${businessId}/stats`);
+  } catch {
+    // No API available — build stats entirely from localStorage.
+    // Collect all store-scoped employee keys to discover known stores.
+    const storeIds = Object.keys(localStorage)
+      .filter((k) => k.startsWith("storehub_employees_"))
+      .map((k) => k.replace("storehub_employees_", ""));
+
+    const stores: StoreInfo[] = storeIds.map((id) => ({
+      userId:              id,
+      storeName:           `Store ${id.slice(0, 6)}`,
+      ownerName:           "",
+      businessType:        "",
+      onboardingCompleted: true,
+      storageMode:         "local",
+      storeCity:           null,
+      createdAt:           "",
+      lastUpdated:         "",
+      revenue:             localSalesRevenue(id),
+      productCount:        localProductCount(id),
+      employeeCount:       localEmployeeCount(id),
+    }));
+
+    return {
+      totalStores:    stores.length,
+      totalRevenue:   stores.reduce((s, r) => s + r.revenue, 0),
+      totalProducts:  stores.reduce((s, r) => s + r.productCount, 0),
+      totalEmployees: stores.reduce((s, r) => s + r.employeeCount, 0),
+      stores,
+    };
+  }
+
+  // API succeeded — supplement each store's counts with localStorage data so
+  // locally-added records (not yet pushed to the server) are reflected.
+  const enrichedStores = stats.stores.map((store) => {
+    const localEmps  = localEmployeeCount(store.userId);
+    const localRev   = localSalesRevenue(store.userId);
+    const localProds = localProductCount(store.userId);
+    return {
+      ...store,
+      employeeCount: Math.max(store.employeeCount, localEmps),
+      revenue:       Math.max(store.revenue,       localRev),
+      productCount:  Math.max(store.productCount,  localProds),
+    };
+  });
+
+  return {
+    ...stats,
+    stores:         enrichedStores,
+    totalEmployees: enrichedStores.reduce((s, r) => s + r.employeeCount, 0),
+    totalRevenue:   enrichedStores.reduce((s, r) => s + r.revenue, 0),
+    totalProducts:  enrichedStores.reduce((s, r) => s + r.productCount, 0),
+  };
 }
 
 // ── Store creation ────────────────────────────────────────────────────────────

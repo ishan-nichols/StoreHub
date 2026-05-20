@@ -36,14 +36,26 @@ export interface CustomerOffer {
 const BASE = `${API_BASE_URL}/api/customers`;
 
 async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
+  const activeStoreId = typeof window !== "undefined" ? sessionStorage.getItem("sh_active_store_id") : null;
   const res = await fetch(url, {
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
     ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(activeStoreId ? { "X-Store-User-Id": activeStoreId } : {}),
+      ...opts?.headers,
+    },
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    const text = await res.text().catch(() => "");
+    let body: any = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+    const errorMessage = (body && body.error) || text || `HTTP ${res.status}`;
+    throw new Error(`${url} -> ${errorMessage}`);
   }
   return res.json() as Promise<T>;
 }
@@ -76,9 +88,16 @@ export async function createCustomer(data: Partial<Customer>): Promise<Customer>
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>): Promise<Customer> {
+  const payload = Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined),
+  );
+  if (Object.keys(payload).length === 0) {
+    return getCustomer(id);
+  }
+
   return apiFetch<Customer>(`${BASE}/${id}`, {
     method: "PATCH",
-    body: JSON.stringify(data),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -152,6 +171,33 @@ export async function generateOffer(id: string, customer?: CustomerWithHistory):
   });
   setCachedOffer(id, offer);
   return offer;
+}
+
+// ─── Loyalty Transaction Logging ──────────────────────────────────────────────
+
+export async function logLoyaltyTransaction(
+  customerId: string,
+  type: "earn" | "redeem" | "reward_unlock" | "admin_adjust",
+  pointsChange: number,
+  options?: {
+    saleAmount?: number;
+    rewardUsed?: string;
+    saleId?: string;
+    notes?: string;
+    metadata?: Record<string, any>;
+  }
+): Promise<{ transaction: any; customerBalanceAfter: number }> {
+  return apiFetch<{ transaction: any; customerBalanceAfter: number }>(
+    `${BASE}/${customerId}/log-transaction`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        type,
+        pointsChange,
+        ...options,
+      }),
+    }
+  );
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

@@ -603,15 +603,32 @@ function RetailPOSPage() {
   const [discountInputValue, setDiscountInputValue] = useState("");
 
   async function load() {
-    const productList = await getProducts();
-    setProducts(productList);
-    setLoading(false);
+    try {
+      const productList = await getProducts();
+      setProducts(productList);
+    } catch (error) {
+      console.error("Failed to load products for POS:", error);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     void load();
-    window.addEventListener("storehub:products-updated", load);
-    return () => window.removeEventListener("storehub:products-updated", load);
+
+    const handleProductsUpdated = () => void load();
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "storehub_products" || event.key === "storehub:products-updated") {
+        void load();
+      }
+    };
+
+    window.addEventListener("storehub:products-updated", handleProductsUpdated);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storehub:products-updated", handleProductsUpdated);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   useEffect(() => {
@@ -643,20 +660,25 @@ function RetailPOSPage() {
     setFullscreenMode(false);
   }
 
-  const categories = useMemo(() => ["All", ...Array.from(new Set(products.map((product) => product.category).filter(Boolean)))], [products]);
+  const categories = useMemo(
+    () => ["All", ...Array.from(new Set(products.map((product) => product.category).filter(Boolean)))],
+    [products],
+  );
   const filtered = useMemo(
     () =>
       products.filter((product) => {
+        const category = product.category ?? "";
         const matchSearch =
           product.name.toLowerCase().includes(search.toLowerCase()) ||
-          product.category.toLowerCase().includes(search.toLowerCase());
-        const matchCategory = activeCategory === "All" || product.category === activeCategory;
+          category.toLowerCase().includes(search.toLowerCase());
+        const matchCategory = activeCategory === "All" || category === activeCategory;
         return matchSearch && matchCategory && product.quantity > 0;
       }),
     [activeCategory, products, search],
   );
 
-  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const roundToCents = (v: number) => Math.round(v * 100) / 100;
+  const subtotal = roundToCents(cart.reduce((sum, item) => sum + item.price * item.quantity, 0));
   const cartByProductId = useMemo(
     () => new Map(cart.map((item) => [item.productId, item])),
     [cart],
@@ -664,12 +686,12 @@ function RetailPOSPage() {
   const taxRate = profile?.taxRate ?? 0;
   const discountAmount = discount
     ? discount.type === "percent"
-      ? parseFloat(((subtotal * discount.value) / 100).toFixed(2))
+      ? roundToCents((subtotal * discount.value) / 100)
       : Math.min(discount.value, subtotal)
     : 0;
-  const discountedSubtotal = subtotal - discountAmount;
-  const tax = parseFloat(((discountedSubtotal * taxRate) / 100).toFixed(2));
-  const total = discountedSubtotal + tax;
+  const discountedSubtotal = roundToCents(subtotal - discountAmount);
+  const tax = roundToCents((discountedSubtotal * taxRate) / 100);
+  const total = roundToCents(discountedSubtotal + tax);
   const change = amountPaid - total;
 
   function addToCart(product: Product) {
@@ -1150,10 +1172,14 @@ function RetailPOSPage() {
 
           <div className="mt-5 space-y-3 border-t border-stone-200 pt-5">
             <LineItem label="Subtotal" value={formatCurrency(subtotal, currencySymbol)} />
+            {discountAmount > 0 && <LineItem label={`Discount${discount?.type === "percent" ? ` (${discount.value}%)` : ""}`} value={`-${formatCurrency(discountAmount, currencySymbol)}`} />}
             <LineItem label={`Tax${taxRate ? ` (${taxRate}%)` : ""}`} value={formatCurrency(tax, currencySymbol)} />
             <LineItem label="Total" value={formatCurrency(total, currencySymbol)} strong />
             <button
-              onClick={() => setShowCheckout(true)}
+              onClick={() => {
+                setAmountPaid(total);
+                setShowCheckout(true);
+              }}
               disabled={cart.length === 0}
               className="w-full rounded-2xl bg-stone-950 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-50"
             >

@@ -1,0 +1,49 @@
+# ─── Stage 1: Build ───────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+RUN corepack enable pnpm
+
+WORKDIR /app
+
+# Copy workspace manifests first for layer caching
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY artifacts/api-server/package.json ./artifacts/api-server/
+COPY lib/db/package.json                ./lib/db/
+COPY lib/api-zod/package.json           ./lib/api-zod/
+COPY lib/integrations-anthropic-ai/package.json ./lib/integrations-anthropic-ai/
+COPY lib/integrations-openai-ai-server/package.json ./lib/integrations-openai-ai-server/
+
+RUN pnpm install --frozen-lockfile --filter @workspace/api-server...
+
+# Copy source
+COPY lib/          ./lib/
+COPY artifacts/api-server/ ./artifacts/api-server/
+COPY tsconfig.base.json    ./
+
+# Build
+RUN pnpm --filter @workspace/api-server build
+
+# ─── Stage 2: Production ──────────────────────────────────────────────────────
+FROM node:20-alpine AS production
+
+RUN addgroup -S storehub && adduser -S storehub -G storehub
+
+WORKDIR /app
+
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY artifacts/api-server/package.json ./artifacts/api-server/
+COPY lib/db/package.json                ./lib/db/
+
+RUN corepack enable pnpm && \
+    pnpm install --frozen-lockfile --prod --filter @workspace/api-server...
+
+# Copy built output
+COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
+
+USER storehub
+
+EXPOSE 8080
+
+ENV NODE_ENV=production
+
+CMD ["node", "--enable-source-maps", "/app/artifacts/api-server/dist/index.mjs"]

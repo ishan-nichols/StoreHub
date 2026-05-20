@@ -133,6 +133,7 @@ export const products = pgTable("products", {
   costPrice:          doublePrecision("cost_price"),
   srp:                doublePrecision("srp"),
   marginAlertPct:     doublePrecision("margin_alert_pct"),
+  marginTarget:       doublePrecision("margin_target"),
   priceHistory:       jsonb("price_history"),
   posSyncStatus:      varchar("pos_sync_status", { length: 30 }),
   posSyncError:       text("pos_sync_error"),
@@ -205,6 +206,7 @@ export const employees = pgTable("employees", {
   dailyWage:   numeric("daily_wage", { precision: 10, scale: 2 }).default("0"),
   jobTitle:    varchar("job_title", { length: 100 }),
   permissions: jsonb("permissions").$type<Record<string, boolean>>(),
+  email:       varchar("email", { length: 255 }),
   createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ byUser: index("employees_user_idx").on(t.userId) }));
 
@@ -363,3 +365,48 @@ export const shrinkageLog = pgTable("shrinkage_log", {
 
 export type ShrinkageLogEntry       = typeof shrinkageLog.$inferSelect;
 export type InsertShrinkageLogEntry = typeof shrinkageLog.$inferInsert;
+
+// ─── Loyalty Transactions ────────────────────────────────────────────────────
+export const loyaltyTransactions = pgTable("loyalty_transactions", {
+  id:              uuid("id").primaryKey().defaultRandom(),
+  userId:          userRef(),
+  customerId:      uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  type:            varchar("type", { length: 30 }).notNull(), // 'earn', 'redeem', 'reward_unlock', 'admin_adjust'
+  pointsChange:    doublePrecision("points_change").notNull(), // positive for earn, negative for redeem
+  pointsBalanceBefore: doublePrecision("points_balance_before").notNull(),
+  pointsBalanceAfter: doublePrecision("points_balance_after").notNull(),
+  saleAmount:      doublePrecision("sale_amount"), // total sale amount if this is from a purchase
+  rewardUsed:      varchar("reward_used", { length: 100 }), // e.g. "$5 off", "Free Item"
+  saleId:          uuid("sale_id").references(() => sales.id, { onDelete: "set null" }),
+  notes:           text("notes"),
+  metadata:        jsonb("metadata").notNull().default({}), // additional context as JSON
+  createdAt:       timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  byUser: index("loyalty_txn_user_idx").on(t.userId),
+  byCustomer: index("loyalty_txn_customer_idx").on(t.customerId),
+  byDate: index("loyalty_txn_date_idx").on(t.userId, t.createdAt),
+}));
+
+export type LoyaltyTransaction       = typeof loyaltyTransactions.$inferSelect;
+export type InsertLoyaltyTransaction = typeof loyaltyTransactions.$inferInsert;
+
+// ─── Refunds ─────────────────────────────────────────────────────────────────
+export const refunds = pgTable("refunds", {
+  id:            uuid("id").primaryKey().defaultRandom(),
+  userId:        userRef(),
+  saleId:        uuid("sale_id").notNull().references(() => sales.id, { onDelete: "cascade" }),
+  items:         jsonb("items").notNull().default([]),
+  amount:        doublePrecision("amount").notNull().default(0),
+  reason:        varchar("reason", { length: 50 }).notNull().default("other"),
+  reasonNote:    text("reason_note"),
+  paymentMethod: varchar("payment_method", { length: 50 }).notNull().default(""),
+  employeeId:    uuid("employee_id"),
+  createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  byUser:    index("refunds_user_idx").on(t.userId),
+  byUserDate: index("refunds_user_date_idx").on(t.userId, t.createdAt),
+  bySale:    index("refunds_sale_idx").on(t.saleId),
+}));
+
+export type DbRefund       = typeof refunds.$inferSelect;
+export type InsertDbRefund = typeof refunds.$inferInsert;

@@ -12,14 +12,19 @@ export interface StoreLocation {
   createdAt: string;
 }
 
-const BASE = `${API_BASE_URL}/api/store/locations`;
+const BASE = `${API_BASE_URL}/api/storehub/locations`;
 const ACTIVE_KEY = "storehub_active_location";
 
 async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
+  const activeStoreId = typeof window !== "undefined" ? sessionStorage.getItem("sh_active_store_id") : null;
   const res = await fetch(url, {
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
     ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(activeStoreId ? { "X-Store-User-Id": activeStoreId } : {}),
+      ...opts?.headers,
+    },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

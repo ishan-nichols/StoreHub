@@ -35,7 +35,24 @@ interface AuthContextValue {
   restoreBusiness:  () => void;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+const defaultAuthContext: AuthContextValue = {
+  user: null,
+  isLoading: true,
+  isAuthenticated: false,
+  isAdmin: false,
+  isBusinessOwner: false,
+  isStoreOwner: false,
+  businessId: undefined,
+  activeStoreId: null,
+  isSwitched: false,
+  setUser: async () => {},
+  logout: async () => {},
+  recheckAuth: async () => null,
+  switchToStore: () => {},
+  restoreBusiness: () => {},
+};
+
+const AuthContext = createContext<AuthContextValue>(defaultAuthContext);
 
 const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
 const REFRESH_AHEAD_MS    =  2 * 60 * 1000;
@@ -136,7 +153,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
-  return ctx;
+  return useContext(AuthContext);
 }

@@ -244,6 +244,7 @@ export default function IntegrationsPage() {
 
   // Increments after each successful sync — triggers FuelDashboard refresh
   const [syncTick, setSyncTick] = useState(0);
+  const { activeStoreId } = useAuth();
 
   const loadStates = useCallback(() => {
     const newStates: Record<string, ConnectionState> = {};
@@ -252,7 +253,7 @@ export default function IntegrationsPage() {
       if (state) newStates[sys.id] = state;
     }
     setStates(newStates);
-  }, []);
+  }, [activeStoreId]);
 
   useEffect(() => { loadStates(); }, [loadStates]);
 

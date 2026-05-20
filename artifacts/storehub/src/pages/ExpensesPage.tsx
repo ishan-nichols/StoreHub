@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../contexts/useApp";
+import { useAuth } from "../contexts/AuthContext";
 import { getExpenses, createExpense, updateExpense, deleteExpense, getTaxSummary } from "../services/dataService";
 import { getRegion } from "../data/taxData";
 import type { Expense, InsertExpense } from "../schemas";
@@ -30,6 +31,7 @@ type Tab = "expenses" | "tax";
 
 export default function ExpensesPage() {
   const { t, currencySymbol, profile } = useApp();
+  const { activeStoreId } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("expenses");
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +57,7 @@ export default function ExpensesPage() {
     setTaxLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [activeStoreId]);
 
   useEffect(() => {
     if (activeTab === "tax") { loadTaxSummary(); }

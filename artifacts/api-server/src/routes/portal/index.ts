@@ -11,7 +11,7 @@
  */
 
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { eq, and, isNull, gte, desc } from "drizzle-orm";
+import { eq, and, isNull, gte, desc, count } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { storeProfiles, employees, shifts } from "@workspace/db";
 import {
@@ -83,11 +83,17 @@ router.post("/:storeUserId/verify-pin", async (req: Request, res: Response) => {
   }
 
   // 1. Check employee PINs.
-  const [emp] = await db
+  const matches = await db
     .select()
     .from(employees)
-    .where(and(eq(employees.userId, storeUserId), eq(employees.pin, pin)))
-    .limit(1);
+    .where(and(eq(employees.userId, storeUserId), eq(employees.pin, pin)));
+
+  if (matches.length > 1) {
+    res.status(409).json({ error: "PIN conflict: multiple employees share this PIN. Ask your manager to assign unique PINs." });
+    return;
+  }
+
+  const emp = matches[0];
 
   if (emp) {
     const perms = (emp.permissions ?? { pos: true }) as Record<string, boolean>;

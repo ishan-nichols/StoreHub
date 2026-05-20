@@ -1,0 +1,47 @@
+                      List of tables
+ Schema |             Name              | Type  |  Owner   
+--------+-------------------------------+-------+----------
+ public | analytics_events              | table | postgres
+ public | auth_tokens                   | table | postgres
+ public | businesses                    | table | postgres
+ public | conversations                 | table | postgres
+ public | customers                     | table | postgres
+ public | daily_pay_records             | table | postgres
+ public | employee_access_logs          | table | postgres
+ public | employee_access_policies      | table | postgres
+ public | employee_allowed_locations    | table | postgres
+ public | employee_announcements        | table | postgres
+ public | employee_permission_overrides | table | postgres
+ public | employee_profiles             | table | postgres
+ public | employee_requests             | table | postgres
+ public | employee_role_permissions     | table | postgres
+ public | employee_roles                | table | postgres
+ public | employee_schedules            | table | postgres
+ public | employee_system_settings      | table | postgres
+ public | employee_trusted_devices      | table | postgres
+ public | employees                     | table | postgres
+ public | expenses                      | table | postgres
+ public | ingredients                   | table | postgres
+ public | menu_items                    | table | postgres
+ public | messages                      | table | postgres
+ public | phone_otps                    | table | postgres
+ public | products                      | table | postgres
+ public | recipe_ingredients            | table | postgres
+ public | recipes                       | table | postgres
+ public | recurring_expenses            | table | postgres
+ public | refresh_tokens                | table | postgres
+ public | sales                         | table | postgres
+ public | scheduled_price_changes       | table | postgres
+ public | shifts                        | table | postgres
+ public | shrinkage_log                 | table | postgres
+ public | social_accounts               | table | postgres
+ public | store_locations               | table | postgres
+ public | store_profiles                | table | postgres
+ public | suppliers                     | table | postgres
+ public | user_integrations             | table | postgres
+ public | users                         | table | postgres
+ public | webauthn_challenges           | table | postgres
+ public | webauthn_credentials          | table | postgres
+ public | workforce_permissions         | table | postgres
+(42 rows)
+

@@ -24,12 +24,18 @@ export const users = pgTable(
 );
 
 export const refreshTokens = pgTable("refresh_tokens", {
-  id:         uuid("id").primaryKey().defaultRandom(),
-  userId:     uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  tokenHash:  varchar("token_hash", { length: 255 }).notNull().unique(),
-  expiresAt:  timestamp("expires_at", { withTimezone: true }).notNull(),
-  deviceInfo: varchar("device_info", { length: 500 }),
-  createdAt:  timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  id:             uuid("id").primaryKey().defaultRandom(),
+  userId:         uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash:      varchar("token_hash", { length: 255 }).notNull().unique(),
+  expiresAt:      timestamp("expires_at", { withTimezone: true }).notNull(),
+  // Device tracking for session management
+  deviceInfo:     varchar("device_info", { length: 500 }),
+  deviceName:     varchar("device_name", { length: 255 }),
+  deviceType:     varchar("device_type", { length: 50 }),   // desktop | mobile | tablet
+  lastUsedAt:     timestamp("last_used_at", { withTimezone: true }),
+  lastIpAddress:  varchar("last_ip_address", { length: 45 }),
+  lastUserAgent:  text("last_user_agent"),
+  createdAt:      timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // Used for both email verification and password reset tokens
@@ -81,9 +87,32 @@ export const webauthnChallenges = pgTable("webauthn_challenges", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ─── TOTP / MFA ───────────────────────────────────────────────────────────────
+export const totpSecrets = pgTable("totp_secrets", {
+  id:          uuid("id").primaryKey().defaultRandom(),
+  userId:      uuid("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  // AES-256-GCM encrypted TOTP secret (stored as "iv:authTag:ciphertext" hex)
+  secretEnc:   text("secret_enc").notNull(),
+  // bcrypt hashed backup codes — store each hash separately as JSON array
+  backupCodes: text("backup_codes").array().notNull().default([]),
+  enabledAt:   timestamp("enabled_at", { withTimezone: true }),
+  createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Short-lived MFA challenge token issued after password check, before TOTP check
+export const mfaChallenges = pgTable("mfa_challenges", {
+  id:        uuid("id").primaryKey().defaultRandom(),
+  userId:    uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token:     varchar("token", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  used:      boolean("used").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type User                = typeof users.$inferSelect;
 export type InsertUser          = typeof users.$inferInsert;
 export type RefreshToken        = typeof refreshTokens.$inferSelect;
 export type PhoneOtp            = typeof phoneOtps.$inferSelect;
 export type SocialAccount       = typeof socialAccounts.$inferSelect;
 export type WebAuthnCredential  = typeof webauthnCredentials.$inferSelect;
+export type TotpSecret          = typeof totpSecrets.$inferSelect;

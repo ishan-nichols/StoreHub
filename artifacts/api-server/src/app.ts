@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes/index.js";
 import { logger } from "./lib/logger.js";
+import { authLimiter, apiLimiter } from "./middlewares/rateLimit.js";
 
 const app: Express = express();
 
@@ -42,6 +43,10 @@ app.use(
 app.use(cookieParser());
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+
+// Rate limiting — auth routes are stricter than general API
+app.use("/api/auth", authLimiter as any);
+app.use("/api",      apiLimiter  as any);
 
 app.use("/api", router);
 
