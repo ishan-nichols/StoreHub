@@ -782,14 +782,25 @@ export default function OnboardingPage() {
         paymentsEnabled: true,
       } as any;
 
-      localStorage.setItem("onboardingComplete", "true");
-      localStorage.setItem("storehub_user_profile", JSON.stringify(profile));
+      // Scope all store-profile writes to the active store when in switched mode.
+      // The bare "storehub_user_profile" key must NOT be written here — it belongs
+      // to the business owner's own dashboard and writing Store A's data there would
+      // make Store A's personalization bleed into every other store view.
+      const activeStoreId = sessionStorage.getItem("sh_active_store_id");
+      const storeHeaders: Record<string, string> = activeStoreId
+        ? { "X-Store-User-Id": activeStoreId }
+        : {};
+
+      // Only set the global onboarding flag when not inside a switched store session.
+      if (!activeStoreId) {
+        localStorage.setItem("onboardingComplete", "true");
+      }
 
       if (a.logoAccentColor) applyAccentColor(a.logoAccentColor);
 
       await fetch("/api/onboarding/ensure-store-profile", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...storeHeaders },
         body: JSON.stringify({
           storeName:    profile.storeName,
           ownerName:    profile.ownerName,
@@ -799,12 +810,11 @@ export default function OnboardingPage() {
         credentials: "include",
       });
 
-      // Mark onboarding complete in the DB so the business stores page
-      // reflects the correct status (storeProfiles.onboardingCompleted = true)
-      await fetch("/api/store/profile", {
+      // Push the full profile (including personalization) to this store's DB record.
+      await fetch("/api/storehub/profile", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ onboardingCompleted: true }),
+        headers: { "Content-Type": "application/json", ...storeHeaders },
+        body: JSON.stringify(profile),
         credentials: "include",
       });
 
