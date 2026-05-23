@@ -15,7 +15,10 @@ export function formatCurrency(amount: number, symbol: string = "$"): string {
 }
 
 export function formatDate(dateStr: string): string {
-  const d = new Date(dateStr);
+  // Parse YYYY-MM-DD portion as local date to avoid UTC-midnight timezone shift.
+  const iso = typeof dateStr === "string" ? dateStr : new Date(dateStr).toISOString();
+  const [year, month, day] = iso.split("T")[0].split("-").map(Number);
+  const d = new Date(year, month - 1, day);
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
