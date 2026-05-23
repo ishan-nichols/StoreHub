@@ -60,8 +60,19 @@ export function buildCrudRouter(opts: CrudTable): IRouter {
 
   router.post("/", async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const { id: _i, userId: _u, createdAt: _c, updatedAt: _ud, ...rest } = body;
+    const { id: _i, userId: _u, createdAt: _c, updatedAt: _ud, ...rawRest } = body;
     void _i; void _u; void _c; void _ud;
+
+    // Convert ISO date strings to Date objects for timestamp columns (same as PATCH handler).
+    const tableColumns: Record<string, any> = (table as any)[Symbol.for("drizzle:Columns")] ?? {};
+    const rest = Object.fromEntries(
+      Object.entries(rawRest).map(([k, v]) => {
+        const col = tableColumns[k];
+        if (col?.dataType === "date" && typeof v === "string") return [k, new Date(v)];
+        return [k, v];
+      }),
+    );
+
     try {
       const [row] = await (db as any)
         .insert(table)
