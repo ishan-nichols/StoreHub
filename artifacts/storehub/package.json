@@ -13,7 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bundle:electron": "../../node_modules/.pnpm/esbuild@0.27.3/node_modules/esbuild/bin/esbuild electron/main.cjs --bundle --platform=node --target=node20 --external:electron --format=cjs --outfile=electron/main.bundle.cjs",
     "electron": "pnpm run build && pnpm run bundle:electron && electron .",
-    "electron:dev": "pnpm run bundle:electron && concurrently \"pnpm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "pnpm run bundle:electron && concurrently \"pnpm run dev\" \"wait-on http://localhost:5173 && electron . --use-dev-server\"",
     "build:electron": "pnpm run build && node scripts/build-electron.mjs",
     "build:electron:publish": "pnpm run build && node scripts/build-electron.mjs --publish",
     "build:native": "bash scripts/build-native.sh",

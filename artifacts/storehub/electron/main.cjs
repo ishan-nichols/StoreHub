@@ -1,17 +1,17 @@
 'use strict';
 
 const {
-  app, BrowserWindow, BrowserView, Menu, Tray, shell,
+  app, BrowserWindow, Menu, Tray, shell,
   ipcMain, dialog, globalShortcut, nativeImage, session,
-  protocol, net, Notification, powerSaveBlocker,
+  Notification, powerSaveBlocker,
 } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
-const url   = require('url');
 
 // ── Globals ───────────────────────────────────────────────────────────────────
 
-const isDev   = require('electron-is-dev');
+// true only when launched via `electron:dev` (Vite dev server is running)
+const useDevServer = process.argv.includes('--use-dev-server');
 const ROOT    = path.join(__dirname, '..');
 const DIST    = path.join(ROOT, 'dist', 'public');
 const ASSETS  = path.join(__dirname, 'assets');
@@ -47,25 +47,6 @@ function saveConfig(key, value) {
   raw[key] = value;
   fs.writeFileSync(CONFIG, JSON.stringify(raw, null, 2));
 }
-
-// ── App SPA protocol ─────────────────────────────────────────────────────────
-// Serves built web assets from a custom "storehub://" scheme so that:
-//   • The SPA router always gets index.html for unknown paths
-//   • fetch('/api/...') calls can be proxied
-// This lets us avoid loading from file:// (which breaks history-mode routers).
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'storehub',
-    privileges: {
-      standard:     true,
-      secure:       true,
-      supportFetchAPI: true,
-      allowServiceWorkers: true,
-      corsEnabled:  true,
-    },
-  },
-]);
 
 // ── Window creation ───────────────────────────────────────────────────────────
 
@@ -105,12 +86,11 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 
   // ── Load URL ──────────────────────────────────────────────────────────────
-  if (isDev) {
-    // Point at the Vite dev server
+  if (useDevServer) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    mainWindow.loadURL('storehub://app/');
+    mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'public', 'index.html'));
   }
 
   // ── Splash / reveal ───────────────────────────────────────────────────────
@@ -154,9 +134,9 @@ function createWindow() {
 
   // ── Navigation guard (keep inside the SPA) ────────────────────────────────
   mainWindow.webContents.on('will-navigate', (e, navUrl) => {
-    const allowed = isDev
+    const allowed = useDevServer
       ? navUrl.startsWith('http://localhost:5173')
-      : navUrl.startsWith('storehub://');
+      : navUrl.startsWith('file://');
     if (!allowed) {
       e.preventDefault();
       shell.openExternal(navUrl);
@@ -167,24 +147,6 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url: openUrl }) => {
     shell.openExternal(openUrl);
     return { action: 'deny' };
-  });
-}
-
-// ── SPA file-serving protocol handler ────────────────────────────────────────
-
-function registerProtocol() {
-  protocol.handle('storehub', (request) => {
-    // Strip scheme + host to get the path portion
-    const reqPath = new URL(request.url).pathname;
-
-    // Check if there's a matching file in dist/public
-    const filePath = path.join(DIST, reqPath === '/' ? 'index.html' : reqPath);
-    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-      return net.fetch(url.pathToFileURL(filePath).toString());
-    }
-
-    // SPA fallback: all unknown paths get index.html
-    return net.fetch(url.pathToFileURL(path.join(DIST, 'index.html')).toString());
   });
 }
 
@@ -383,7 +345,7 @@ function stopSleepBlocker() {
 // ── Auto-updater ──────────────────────────────────────────────────────────────
 
 function setupAutoUpdater() {
-  if (isDev) return;   // don't check for updates during development
+  if (!app.isPackaged) return;   // only check for updates in packaged builds
 
   const { autoUpdater } = require('electron-updater');
 
@@ -494,7 +456,9 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
-  registerProtocol();
+  // Register as a Windows login/startup item so the POS app launches on boot
+  app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
+
   setupPermissions();
   setupBluetooth();
   setupUSB();
