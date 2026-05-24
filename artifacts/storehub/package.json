@@ -1,23 +1,26 @@
 {
   "name": "@workspace/storehub",
   "version": "1.0.0",
+  "description": "StoreHub POS — smart point-of-sale for retail",
+  "author": "StoreHub",
   "private": true,
   "type": "module",
-  "main": "electron/main.cjs",
+  "main": "electron/main.bundle.cjs",
   "scripts": {
     "dev": "vite --config vite.config.ts --host 0.0.0.0",
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "electron": "pnpm run build && electron .",
-    "electron:dev": "concurrently \"pnpm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "build:electron": "pnpm run build && electron-builder --win --config electron-builder.yml",
-    "build:electron:publish": "pnpm run build && electron-builder --win --publish always --config electron-builder.yml",
+    "bundle:electron": "../../node_modules/.pnpm/esbuild@0.27.3/node_modules/esbuild/bin/esbuild electron/main.cjs --bundle --platform=node --target=node20 --external:electron --format=cjs --outfile=electron/main.bundle.cjs",
+    "electron": "pnpm run build && pnpm run bundle:electron && electron .",
+    "electron:dev": "pnpm run bundle:electron && concurrently \"pnpm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "build:electron": "pnpm run build && node scripts/build-electron.mjs",
+    "build:electron:publish": "pnpm run build && node scripts/build-electron.mjs --publish",
     "build:native": "bash scripts/build-native.sh",
     "cap:sync": "npx cap sync",
     "cap:open:ios": "npx cap open ios",
     "cap:open:android": "npx cap open android",
-    "build:all": "pnpm run build && npx cap sync && electron-builder --win --config electron-builder.yml"
+    "build:all": "pnpm run build && pnpm run bundle:electron && npx cap sync && electron-builder --win --config electron-builder.yml"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

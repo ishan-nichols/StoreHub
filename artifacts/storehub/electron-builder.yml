@@ -5,61 +5,58 @@ appId: com.storehub.app
 productName: StoreHub POS
 copyright: Copyright © 2025 StoreHub
 
-# Which files to bundle into the app
+# The Electron main process is bundled by esbuild (see build:electron script)
+# into electron/main.bundle.cjs — all deps inlined, no node_modules needed.
+# The web app is pre-built into dist/public/ by Vite.
 files:
-  - electron/**/*
+  - electron/main.bundle.cjs
+  - electron/preload.cjs
+  - electron/kiosk-pin.html
+  - "electron/assets/**/*"
   - dist/public/**/*
   - package.json
-  - node_modules/**/*
+  - "!node_modules/**/*"
 
-# Entry point (must be CJS because the package is "type": "module")
+# Skip native module rebuild — no native addons
+npmRebuild: false
+# Suppress npm peer-dep errors from monorepo packages (Capacitor etc) that
+# electron-builder scans but are not part of the Electron runtime bundle.
+npmArgs:
+  - --legacy-peer-deps
+
+# Entry point is the esbuild bundle — all deps inlined except 'electron' itself
 extraMetadata:
-  main: electron/main.cjs
+  main: electron/main.bundle.cjs
 
-# ── Windows installer (NSIS) ──────────────────────────────────────────────────
+# ── Windows ───────────────────────────────────────────────────────────────────
 
 win:
   target:
-    - target: nsis
+    - target: zip      # works on Linux — portable zip, extract and run
       arch: [x64]
-  icon: electron/assets/icon.ico   # 256×256 ICO — replace with your brand icon
+    - target: nsis     # full installer .exe — requires Wine on Linux; use windows-latest CI
+      arch: [x64]
+  # icon: electron/assets/icon.ico   # uncomment once you add a 256×256 .ico file
 
 nsis:
-  oneClick:              false    # step-by-step installer (not silent)
+  oneClick:              false
   allowToChangeInstallationDirectory: true
-  perMachine:            false    # installs per-user by default (no admin required)
-  installerIcon:         electron/assets/icon.ico
-  uninstallerIcon:       electron/assets/icon.ico
-  installerHeaderIcon:   electron/assets/icon.ico
+  perMachine:            false
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  # Add to Windows Startup folder so the POS app launches on boot
-  shortcutLocations:
-    - Desktop
-    - StartMenu
-    - StartupFolder
+  runAfterFinish:        true
 
 # ── Auto-updater (GitHub Releases) ───────────────────────────────────────────
-# How to activate:
-#   1. Create a GitHub personal access token with "repo" scope
-#   2. Add it as GH_TOKEN in your CI environment / GitHub Actions secrets
-#   3. Run: pnpm run build:electron   (the publish step uploads to GitHub Releases)
-#
-# The app will then auto-check for updates on launch (see electron/main.cjs).
+# Add GH_TOKEN secret in GitHub Actions → run build:electron:publish to publish.
 
 publish:
   provider:    github
-  owner:       ishan-nichols       # update if repo moves to an org
+  owner:       ishan-nichols
   repo:        StoreHub
-  releaseType: release             # use "draft" during initial setup/testing
-
-# ── macOS (optional — enable if you add a Mac target later) ──────────────────
-# mac:
-#   category: public.app-category.business
-#   target: dmg
+  releaseType: release
 
 # ── Build output ─────────────────────────────────────────────────────────────
 
 directories:
-  output:   dist/electron-dist
-  buildResources: electron/assets
+  output:          dist/electron-dist
+  buildResources:  electron/assets
