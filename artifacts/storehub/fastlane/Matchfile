@@ -1,0 +1,11 @@
+# Matchfile — iOS code signing via encrypted Git repo
+# Set MATCH_GIT_URL to a private repo you control, e.g.:
+#   https://github.com/your-org/storehub-certificates.git
+git_url ENV["MATCH_GIT_URL"]
+
+type "appstore"
+app_identifier ["com.storehub.app"]
+username ENV["APPLE_ID"]
+
+# Clones to a temp dir in CI so the runner disk stays clean
+clone_branch_directly true

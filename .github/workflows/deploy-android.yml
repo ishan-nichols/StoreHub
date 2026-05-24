@@ -1,0 +1,85 @@
+name: Deploy Android → Google Play
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "Fastlane lane to run"
+        required: true
+        default: beta
+        type: choice
+        options:
+          - beta      # build + upload to internal track
+          - deploy    # promote internal → production
+
+# ── How to activate ────────────────────────────────────────────────────────────
+# 1. Generate a release keystore (once):
+#      keytool -genkey -v -keystore release.keystore \
+#        -alias storehub -keyalg RSA -keysize 2048 -validity 10000
+# 2. Base64-encode it:
+#      base64 -w 0 release.keystore
+# 3. Add these GitHub repository secrets (Settings → Secrets → Actions):
+#      ANDROID_KEYSTORE_BASE64      base64 output from step 2
+#      ANDROID_KEYSTORE_PASSWORD    store password chosen in step 1
+#      ANDROID_KEY_ALIAS            storehub (or whatever alias you chose)
+#      ANDROID_KEY_PASSWORD         key password chosen in step 1
+#      GOOGLE_PLAY_JSON_KEY         contents of your Play Store service account JSON
+#                                   (Google Play Console → Setup → API access)
+# ──────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  deploy:
+    name: Build & upload to Play Store (${{ github.event.inputs.lane }})
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: artifacts/storehub
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build web app
+        run: pnpm run build
+
+      - name: Sync Capacitor → Android
+        run: npx cap sync android
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: artifacts/storehub
+
+      - name: Run Fastlane
+        run: bundle exec fastlane android ${{ github.event.inputs.lane }}
+        env:
+          ANDROID_KEYSTORE_BASE64:      ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD:    ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS:            ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD:         ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GOOGLE_PLAY_JSON_KEY:         ${{ secrets.GOOGLE_PLAY_JSON_KEY }}
+          GITHUB_RUN_NUMBER:            ${{ github.run_number }}

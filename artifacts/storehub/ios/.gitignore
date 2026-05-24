@@ -11,3 +11,8 @@ capacitor-cordova-ios-plugins
 # Generated Config files
 App/App/capacitor.config.json
 App/App/config.xml
+
+# Fastlane build output — IPAs are uploaded, never committed
+build/
+*.ipa
+*.dSYM.zip

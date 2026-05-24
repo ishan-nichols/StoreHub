@@ -1,0 +1,28 @@
+StoreHub POS is a complete point-of-sale system built for modern retail businesses.
+
+SELL FASTER
+• Barcode scanning for instant product lookup
+• Lightning-fast checkout with cash, card, and digital payments
+• Split payments and custom discounts
+
+MANAGE YOUR STORE
+• Real-time inventory tracking with low-stock alerts
+• Product catalogue with variants, categories, and pricing
+• Purchase orders and supplier management
+
+UNDERSTAND YOUR BUSINESS
+• Live sales dashboard and daily revenue summaries
+• Best-seller reports, profit margins, and trend analysis
+• Tax reporting and end-of-day reconciliation
+
+BUILT FOR TEAMS
+• Role-based access: owners, managers, and cashiers
+• Employee shift tracking and performance reports
+• Multi-store support from a single account
+
+HARDWARE READY
+• Bluetooth card reader support
+• Receipt printer via Wi-Fi or Bluetooth
+• Works as a dedicated kiosk on any Android tablet
+
+StoreHub POS works fully offline — sales keep processing even without internet, and everything syncs automatically when you reconnect.

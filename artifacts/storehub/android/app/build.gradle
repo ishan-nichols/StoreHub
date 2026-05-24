@@ -22,10 +22,26 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            // Signing credentials are injected at build time by Fastlane (via -P flags)
+            // or read from environment variables. The keystore file itself is written to
+            // disk temporarily by the Fastlane lane and deleted after the build.
+            storeFile     file(project.findProperty("android.injected.signing.store.file")
+                               ?: System.getenv("ANDROID_KEYSTORE_PATH") ?: "release.keystore")
+            storePassword (project.findProperty("android.injected.signing.store.password")
+                               ?: System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "")
+            keyAlias      (project.findProperty("android.injected.signing.key.alias")
+                               ?: System.getenv("ANDROID_KEY_ALIAS") ?: "")
+            keyPassword   (project.findProperty("android.injected.signing.key.password")
+                               ?: System.getenv("ANDROID_KEY_PASSWORD") ?: "")
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig   signingConfigs.release
+            minifyEnabled   false
+            proguardFiles   getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
 }

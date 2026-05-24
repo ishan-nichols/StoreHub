@@ -1,0 +1,135 @@
+default_platform(:ios)
+
+# ── Shared helpers ─────────────────────────────────────────────────────────────
+
+# Build number driven by CI run number so every build is unique and monotonically
+# increasing. Falls back to the current timestamp for local runs.
+def next_build_number
+  ENV.fetch("GITHUB_RUN_NUMBER") { Time.now.to_i.to_s }
+end
+
+# ── iOS ────────────────────────────────────────────────────────────────────────
+
+platform :ios do
+
+  desc "Fetch/refresh certificates and provisioning profiles"
+  lane :certificates do
+    # Uses App Store Connect API key — no 2FA hassle in CI.
+    app_store_connect_api_key(
+      key_id:        ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id:     ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+      key_content:   ENV["APP_STORE_CONNECT_API_KEY_CONTENT"],
+      is_key_content_base64: true,
+    )
+    match(type: "appstore", readonly: is_ci)
+  end
+
+  desc "Build and upload to TestFlight"
+  lane :beta do
+    certificates
+
+    build_number = next_build_number
+
+    # Bump build number in Xcode project (does not touch version string)
+    increment_build_number(
+      build_number: build_number,
+      xcodeproj: "ios/App/App.xcodeproj",
+    )
+
+    build_app(
+      workspace:       "ios/App/App.xcworkspace",
+      scheme:          "App",
+      configuration:   "Release",
+      export_method:   "app-store",
+      output_directory: "ios/build",
+      output_name:     "StoreHubPOS.ipa",
+    )
+
+    upload_to_testflight(
+      ipa:                         "ios/build/StoreHubPOS.ipa",
+      skip_waiting_for_build_processing: true,
+    )
+  end
+
+  desc "Submit latest TestFlight build to App Store review"
+  lane :deploy do
+    app_store_connect_api_key(
+      key_id:        ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id:     ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+      key_content:   ENV["APP_STORE_CONNECT_API_KEY_CONTENT"],
+      is_key_content_base64: true,
+    )
+
+    deliver(
+      submit_for_review:          true,
+      automatic_release:          false,
+      force:                      true,
+      skip_screenshots:           true,
+      skip_binary_upload:         true,  # binary already uploaded via beta lane
+      submission_information: {
+        add_id_info_uses_idfa: false,
+        export_compliance_uses_encryption: false,
+      },
+    )
+  end
+
+end
+
+# ── Android ────────────────────────────────────────────────────────────────────
+
+platform :android do
+
+  desc "Build signed release AAB and upload to Play Store internal track"
+  lane :beta do
+    build_number = next_build_number.to_i
+
+    # Bump versionCode in build.gradle
+    android_set_version_code(
+      version_code:   build_number,
+      gradle_file:    "android/app/build.gradle",
+    )
+
+    # Decode keystore from base64 secret and write to disk
+    keystore_path = "android/app/release.keystore"
+    File.write(
+      keystore_path,
+      Base64.decode64(ENV.fetch("ANDROID_KEYSTORE_BASE64")),
+    )
+
+    gradle(
+      task:              "bundle",
+      build_type:        "release",
+      project_dir:       "android",
+      properties: {
+        "android.injected.signing.store.file"     => File.expand_path(keystore_path),
+        "android.injected.signing.store.password" => ENV["ANDROID_KEYSTORE_PASSWORD"],
+        "android.injected.signing.key.alias"      => ENV["ANDROID_KEY_ALIAS"],
+        "android.injected.signing.key.password"   => ENV["ANDROID_KEY_PASSWORD"],
+      },
+    )
+
+    upload_to_play_store(
+      track:                   "internal",
+      aab:                     "android/app/build/outputs/bundle/release/app-release.aab",
+      json_key_data:           ENV["GOOGLE_PLAY_JSON_KEY"],
+      skip_upload_apk:         true,
+      skip_upload_metadata:    false,
+      skip_upload_images:      true,
+      skip_upload_screenshots: true,
+    )
+
+    # Clean up keystore so it never sits on disk after the build
+    File.delete(keystore_path) if File.exist?(keystore_path)
+  end
+
+  desc "Promote internal track build to production"
+  lane :deploy do
+    upload_to_play_store(
+      track:             "internal",
+      track_promote_to:  "production",
+      json_key_data:     ENV["GOOGLE_PLAY_JSON_KEY"],
+      skip_upload_aab:   true,
+    )
+  end
+
+end
