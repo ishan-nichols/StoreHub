@@ -1,0 +1,72 @@
+name: Deploy Windows → GitHub Releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish release to GitHub"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"   # build + publish to GitHub Releases (triggers auto-updater)
+          - "false"  # build only, no publish (smoke test)
+
+# ── How to activate ────────────────────────────────────────────────────────────
+# 1. Add GH_TOKEN secret (Settings → Secrets → Actions):
+#      GH_TOKEN  GitHub personal access token with "repo" and "write:packages" scopes
+#                (electron-builder uses this to create/update GitHub Releases)
+# 2. Go to Actions tab → "Deploy Windows" → Run workflow
+# 3. The installer .exe is uploaded as a GitHub Release asset automatically
+# 4. Installed apps check GitHub Releases for updates on every launch
+#
+# Code-signing (optional but recommended for production):
+#   Add these secrets to avoid "Windows protected your PC" warnings:
+#      WIN_CSC_LINK        base64-encoded .p12 code-signing certificate
+#      WIN_CSC_KEY_PASSWORD password for the certificate
+# ──────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  build:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: artifacts/storehub
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build web app
+        run: pnpm run build
+
+      - name: Build Windows installer
+        run: pnpm run ${{ github.event.inputs.publish == 'true' && 'build:electron:publish' || 'build:electron' }}
+        env:
+          GH_TOKEN:             ${{ secrets.GH_TOKEN }}
+          WIN_CSC_LINK:         ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StoreHub-POS-Windows-Installer
+          path: artifacts/storehub/dist/electron-dist/*.exe
+          retention-days: 30

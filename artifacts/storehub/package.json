@@ -1,17 +1,23 @@
 {
   "name": "@workspace/storehub",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --config vite.config.ts --host 0.0.0.0",
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "electron": "pnpm run build && electron .",
+    "electron:dev": "concurrently \"pnpm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "build:electron": "pnpm run build && electron-builder --win --config electron-builder.yml",
+    "build:electron:publish": "pnpm run build && electron-builder --win --publish always --config electron-builder.yml",
     "build:native": "bash scripts/build-native.sh",
     "cap:sync": "npx cap sync",
     "cap:open:ios": "npx cap open ios",
-    "cap:open:android": "npx cap open android"
+    "cap:open:android": "npx cap open android",
+    "build:all": "pnpm run build && npx cap sync && electron-builder --win --config electron-builder.yml"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -59,7 +65,10 @@
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "^1.1.1",
+    "concurrently": "^9.2.1",
     "date-fns": "^3.6.0",
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "catalog:",
     "input-otp": "^1.4.2",
@@ -79,6 +88,7 @@
     "uuid": "^13.0.0",
     "vaul": "^1.1.2",
     "vite": "catalog:",
+    "wait-on": "^9.0.10",
     "wouter": "^3.3.5",
     "zod": "catalog:"
   },
@@ -96,6 +106,8 @@
     "@capacitor/status-bar": "^8.0.2",
     "@ericblade/quagga2": "^1.12.1",
     "@react-oauth/google": "^0.13.5",
+    "electron-is-dev": "^3.0.1",
+    "electron-updater": "^6.8.3",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.1"
   }

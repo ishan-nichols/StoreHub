@@ -1,0 +1,65 @@
+# electron-builder configuration — Windows installer (.exe)
+# Docs: https://www.electron.build/configuration/configuration
+
+appId: com.storehub.app
+productName: StoreHub POS
+copyright: Copyright © 2025 StoreHub
+
+# Which files to bundle into the app
+files:
+  - electron/**/*
+  - dist/public/**/*
+  - package.json
+  - node_modules/**/*
+
+# Entry point (must be CJS because the package is "type": "module")
+extraMetadata:
+  main: electron/main.cjs
+
+# ── Windows installer (NSIS) ──────────────────────────────────────────────────
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: electron/assets/icon.ico   # 256×256 ICO — replace with your brand icon
+
+nsis:
+  oneClick:              false    # step-by-step installer (not silent)
+  allowToChangeInstallationDirectory: true
+  perMachine:            false    # installs per-user by default (no admin required)
+  installerIcon:         electron/assets/icon.ico
+  uninstallerIcon:       electron/assets/icon.ico
+  installerHeaderIcon:   electron/assets/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  # Add to Windows Startup folder so the POS app launches on boot
+  shortcutLocations:
+    - Desktop
+    - StartMenu
+    - StartupFolder
+
+# ── Auto-updater (GitHub Releases) ───────────────────────────────────────────
+# How to activate:
+#   1. Create a GitHub personal access token with "repo" scope
+#   2. Add it as GH_TOKEN in your CI environment / GitHub Actions secrets
+#   3. Run: pnpm run build:electron   (the publish step uploads to GitHub Releases)
+#
+# The app will then auto-check for updates on launch (see electron/main.cjs).
+
+publish:
+  provider:    github
+  owner:       ishan-nichols       # update if repo moves to an org
+  repo:        StoreHub
+  releaseType: release             # use "draft" during initial setup/testing
+
+# ── macOS (optional — enable if you add a Mac target later) ──────────────────
+# mac:
+#   category: public.app-category.business
+#   target: dmg
+
+# ── Build output ─────────────────────────────────────────────────────────────
+
+directories:
+  output:   dist/electron-dist
+  buildResources: electron/assets

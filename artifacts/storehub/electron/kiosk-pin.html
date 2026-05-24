@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Exit Kiosk Mode</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #1a1a2e;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      user-select: none;
+    }
+
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      opacity: 0.85;
+      letter-spacing: 0.02em;
+    }
+
+    .dots {
+      display: flex;
+      gap: 0.6rem;
+      margin-bottom: 2rem;
+    }
+
+    .dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.4);
+      background: transparent;
+      transition: background 0.15s;
+    }
+    .dot.filled { background: #fff; border-color: #fff; }
+
+    .keypad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      width: 200px;
+    }
+
+    button {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: #fff;
+      font-size: 1.2rem;
+      font-weight: 500;
+      border-radius: 8px;
+      padding: 0.9rem;
+      cursor: pointer;
+      transition: background 0.1s;
+      -webkit-app-region: no-drag;
+    }
+    button:hover  { background: rgba(255,255,255,0.16); }
+    button:active { background: rgba(255,255,255,0.24); }
+
+    .btn-zero  { grid-column: 2; }
+    .btn-clear { grid-column: 3; font-size: 0.85rem; opacity: 0.7; }
+    .btn-ok    { grid-column: 1 / -1; background: rgba(255,255,255,0.15); font-size: 1rem; letter-spacing: 0.05em; margin-top: 0.25rem; }
+    .btn-ok:hover { background: rgba(255,255,255,0.22); }
+
+    .error {
+      color: #ff6b6b;
+      font-size: 0.8rem;
+      margin-top: 1rem;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .error.visible { opacity: 1; }
+
+    -webkit-app-region: drag;
+  </style>
+</head>
+<body>
+  <h2>Enter PIN to exit kiosk mode</h2>
+
+  <div class="dots" id="dots"></div>
+
+  <div class="keypad">
+    <button onclick="append('1')">1</button>
+    <button onclick="append('2')">2</button>
+    <button onclick="append('3')">3</button>
+    <button onclick="append('4')">4</button>
+    <button onclick="append('5')">5</button>
+    <button onclick="append('6')">6</button>
+    <button onclick="append('7')">7</button>
+    <button onclick="append('8')">8</button>
+    <button onclick="append('9')">9</button>
+    <button class="btn-zero"  onclick="append('0')">0</button>
+    <button class="btn-clear" onclick="clear_()">⌫</button>
+    <button class="btn-ok" onclick="submit()">Unlock</button>
+  </div>
+
+  <div class="error" id="error">Incorrect PIN</div>
+
+  <script>
+    const MAX = 8;
+    let pin = '';
+
+    function renderDots() {
+      const d = document.getElementById('dots');
+      d.innerHTML = Array.from({ length: Math.max(4, pin.length + 1) })
+        .map((_, i) => `<div class="dot ${i < pin.length ? 'filled' : ''}"></div>`)
+        .join('');
+    }
+
+    function append(ch) {
+      if (pin.length >= MAX) return;
+      pin += ch;
+      renderDots();
+    }
+
+    function clear_() {
+      pin = pin.slice(0, -1);
+      renderDots();
+    }
+
+    function submit() {
+      window.electronAPI.submitKioskPin(pin);
+      // Brief error flash — main process closes this window on success
+      setTimeout(() => {
+        document.getElementById('error').classList.add('visible');
+        pin = '';
+        renderDots();
+        setTimeout(() => document.getElementById('error').classList.remove('visible'), 1500);
+      }, 200);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '9') append(e.key);
+      else if (e.key === 'Backspace') clear_();
+      else if (e.key === 'Enter') submit();
+    });
+
+    renderDots();
+  </script>
+</body>
+</html>

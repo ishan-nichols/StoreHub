@@ -60,3 +60,8 @@ api-server.log
 api-server-err.log
 vite.log
 .storehub/
+
+# Electron build output
+artifacts/storehub/dist/electron-dist/
+# Electron never needs icon placeholders committed if they're empty
+artifacts/storehub/electron/assets/.gitkeep
