@@ -242,7 +242,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+        <WouterRouter base={import.meta.env.BASE_URL.replace(/^\.?\/?$|\/$/g, "")}>
           <AppInner />
         </WouterRouter>
         <Toaster />
