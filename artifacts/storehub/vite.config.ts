@@ -6,10 +6,11 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 const port = Number(process.env.PORT ?? "5173");
-const basePath = process.env.BASE_PATH ?? "./";
 
-export default defineConfig({
-  base: basePath,
+export default defineConfig(async ({ command }) => ({
+  // Dev server uses "/" so HMR and asset resolution work correctly.
+  // Production builds use "./" so assets load via file:// in Electron.
+  base: process.env.BASE_PATH ?? (command === "build" ? "./" : "/"),
   cacheDir: "/tmp/storehub-vite-cache",
   plugins: [
     react(),
@@ -64,4 +65,4 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
   },
-});
+}));
