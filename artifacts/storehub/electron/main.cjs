@@ -3,10 +3,22 @@
 const {
   app, BrowserWindow, Menu, Tray, shell,
   ipcMain, dialog, globalShortcut, nativeImage, session,
-  Notification, powerSaveBlocker,
+  Notification, powerSaveBlocker, protocol, net,
 } = require('electron');
+const { pathToFileURL } = require('url');
 const path  = require('path');
 const fs    = require('fs');
+
+// ── Custom protocol (must run before app ready) ───────────────────────────────
+// Registers app:// as a privileged scheme so ES module imports across files
+// share the same origin — file:// treats each path as a unique origin in
+// Chromium, which blocks dynamic imports and causes a white blank screen.
+if (!process.argv.includes('--use-dev-server')) {
+  protocol.registerSchemesAsPrivileged([{
+    scheme:     'app',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+  }]);
+}
 
 // ── Globals ───────────────────────────────────────────────────────────────────
 
@@ -90,7 +102,7 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'public', 'index.html'));
+    mainWindow.loadURL('app://localhost/index.html');
   }
 
   // ── Splash / reveal ───────────────────────────────────────────────────────
@@ -136,7 +148,7 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (e, navUrl) => {
     const allowed = useDevServer
       ? navUrl.startsWith('http://localhost:5173')
-      : navUrl.startsWith('file://');
+      : navUrl.startsWith('app://localhost');
     if (!allowed) {
       e.preventDefault();
       shell.openExternal(navUrl);
@@ -458,6 +470,19 @@ if (!gotLock) {
 app.whenReady().then(() => {
   // Register as a Windows login/startup item so the POS app launches on boot
   app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
+
+  // Serve dist/public via app:// so all files share the same origin.
+  // file:// treats every path as a unique origin in Chromium, blocking ES module imports.
+  if (!useDevServer) {
+    protocol.handle('app', (request) => {
+      const { pathname } = new URL(request.url);
+      const filePath = path.join(DIST, pathname);
+      const target = fs.existsSync(filePath) && fs.statSync(filePath).isFile()
+        ? filePath
+        : path.join(DIST, 'index.html');
+      return net.fetch(pathToFileURL(target).toString());
+    });
+  }
 
   setupPermissions();
   setupBluetooth();
