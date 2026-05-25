@@ -3,9 +3,8 @@
 const {
   app, BrowserWindow, Menu, Tray, shell,
   ipcMain, dialog, globalShortcut, nativeImage, session,
-  Notification, powerSaveBlocker, protocol, net,
+  Notification, powerSaveBlocker, protocol,
 } = require('electron');
-const { pathToFileURL } = require('url');
 const path  = require('path');
 const fs    = require('fs');
 
@@ -103,6 +102,12 @@ function createWindow() {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     mainWindow.loadURL('app://localhost/index.html');
+    // F12 opens DevTools for debugging production builds
+    mainWindow.webContents.on('before-input-event', (_e, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') {
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
+      }
+    });
   }
 
   // ── Splash / reveal ───────────────────────────────────────────────────────
@@ -473,14 +478,30 @@ app.whenReady().then(() => {
 
   // Serve dist/public via app:// so all files share the same origin.
   // file:// treats every path as a unique origin in Chromium, blocking ES module imports.
+  // Using fs directly ensures asar-packaged files are read correctly.
   if (!useDevServer) {
+    const MIME = {
+      '.html': 'text/html',
+      '.js':   'application/javascript',
+      '.mjs':  'application/javascript',
+      '.css':  'text/css',
+      '.svg':  'image/svg+xml',
+      '.png':  'image/png',
+      '.jpg':  'image/jpeg',
+      '.ico':  'image/x-icon',
+      '.json': 'application/json',
+      '.woff': 'font/woff',
+      '.woff2':'font/woff2',
+    };
     protocol.handle('app', (request) => {
       const { pathname } = new URL(request.url);
-      const filePath = path.join(DIST, pathname);
-      const target = fs.existsSync(filePath) && fs.statSync(filePath).isFile()
-        ? filePath
+      const candidate = path.join(DIST, pathname);
+      const target = (fs.existsSync(candidate) && fs.statSync(candidate).isFile())
+        ? candidate
         : path.join(DIST, 'index.html');
-      return net.fetch(pathToFileURL(target).toString());
+      const data = fs.readFileSync(target);
+      const mime = MIME[path.extname(target)] ?? 'application/octet-stream';
+      return new Response(data, { headers: { 'Content-Type': mime } });
     });
   }
 
