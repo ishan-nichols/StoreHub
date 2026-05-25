@@ -3679,14 +3679,14 @@ Please double check that your authentication token is correct. Due to security r
         return newOptions;
       }
       static reconstructOriginalUrl(options) {
-        const protocol = options.protocol || "https:";
+        const protocol2 = options.protocol || "https:";
         if (!options.hostname) {
           throw new Error("Missing hostname in request options");
         }
         const hostname = options.hostname;
         const port = options.port ? `:${options.port}` : "";
         const path2 = options.path || "/";
-        return new url_1.URL(`${protocol}//${hostname}${port}${path2}`);
+        return new url_1.URL(`${protocol2}//${hostname}${port}${path2}`);
       }
       static isCrossOriginRedirect(originalUrl, redirectUrl) {
         if (originalUrl.hostname.toLowerCase() !== redirectUrl.hostname.toLowerCase()) {
@@ -3723,9 +3723,9 @@ Please double check that your authentication token is correct. Due to security r
         return new url_1.URL(url);
       } catch {
         const hostname = options.hostname;
-        const protocol = options.protocol || "https:";
+        const protocol2 = options.protocol || "https:";
         const port = options.port ? `:${options.port}` : "";
-        const baseUrl = `${protocol}//${hostname}${port}`;
+        const baseUrl = `${protocol2}//${hostname}${port}`;
         return new url_1.URL(url, baseUrl);
       }
     }
@@ -15490,10 +15490,17 @@ var {
   nativeImage,
   session,
   Notification,
-  powerSaveBlocker
+  powerSaveBlocker,
+  protocol
 } = require("electron");
 var path = require("path");
 var fs = require("fs");
+if (!process.argv.includes("--use-dev-server")) {
+  protocol.registerSchemesAsPrivileged([{
+    scheme: "app",
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  }]);
+}
 var useDevServer = process.argv.includes("--use-dev-server");
 var ROOT = path.join(__dirname, "..");
 var DIST = path.join(ROOT, "dist", "public");
@@ -15558,7 +15565,13 @@ function createWindow() {
     mainWindow.loadURL("http://localhost:5173");
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    mainWindow.loadFile(path.join(app.getAppPath(), "dist", "public", "index.html"));
+    mainWindow.loadURL("app://localhost/index.html");
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+    mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
+      dialog.showErrorBox("Load failed", `${desc} (${code})
+
+${url}`);
+    });
   }
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
@@ -15590,7 +15603,7 @@ function createWindow() {
     });
   }
   mainWindow.webContents.on("will-navigate", (e, navUrl) => {
-    const allowed = useDevServer ? navUrl.startsWith("http://localhost:5173") : navUrl.startsWith("file://");
+    const allowed = useDevServer ? navUrl.startsWith("http://localhost:5173") : navUrl.startsWith("app://localhost");
     if (!allowed) {
       e.preventDefault();
       shell.openExternal(navUrl);
@@ -15838,6 +15851,29 @@ if (!gotLock) {
 }
 app.whenReady().then(() => {
   app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
+  if (!useDevServer) {
+    const MIME = {
+      ".html": "text/html",
+      ".js": "application/javascript",
+      ".mjs": "application/javascript",
+      ".css": "text/css",
+      ".svg": "image/svg+xml",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".ico": "image/x-icon",
+      ".json": "application/json",
+      ".woff": "font/woff",
+      ".woff2": "font/woff2"
+    };
+    protocol.handle("app", (request) => {
+      const { pathname } = new URL(request.url);
+      const candidate = path.join(DIST, pathname);
+      const target = fs.existsSync(candidate) && fs.statSync(candidate).isFile() ? candidate : path.join(DIST, "index.html");
+      const data = fs.readFileSync(target);
+      const mime = MIME[path.extname(target)] ?? "application/octet-stream";
+      return new Response(data, { headers: { "Content-Type": mime } });
+    });
+  }
   setupPermissions();
   setupBluetooth();
   setupUSB();

@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { customers, sales, loyaltyTransactions } from "@workspace/db/schema";
 import { requireAuth } from "../../middlewares/requireAuth.js";
 import Anthropic from "@anthropic-ai/sdk";
+import { createContact, updateContact } from "../../lib/brevoEmailService.js";
 
 
 const router = Router();
@@ -122,6 +123,16 @@ router.post("/", async (req, res) => {
         notes: notes?.trim() ?? null,
       })
       .returning();
+
+    // Sync new customer to Brevo contact list for marketing
+    if (row.email) {
+      const [firstName] = (row.name ?? "").split(" ");
+      createContact(row.email, firstName, row.phone ?? undefined, {
+        TOTAL_SPEND: 0,
+        LOYALTY_POINTS: 0,
+      }).catch(() => {});
+    }
+
     res.status(201).json({ ...row, isLapsed: false });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
@@ -228,6 +239,15 @@ router.post("/:id/add-points", async (req, res) => {
       res.status(404).json({ error: "Not found" });
       return;
     }
+
+    // Keep Brevo contact in sync with latest loyalty points and total spend
+    if (row.email) {
+      updateContact(row.email, {
+        LOYALTY_POINTS: row.loyaltyPoints as number,
+        TOTAL_SPEND: Number(row.totalSpent ?? 0),
+      }).catch(() => {});
+    }
+
     res.json({ loyaltyPoints: row.loyaltyPoints });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });

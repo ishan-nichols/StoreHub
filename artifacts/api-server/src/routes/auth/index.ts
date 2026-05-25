@@ -2,7 +2,7 @@
  * Auth routes — email/password, phone OTP, social login (OAuth), WebAuthn/biometric
  *
  * Integration hooks (search for these comments to plug in real services):
- * - INTEGRATION: EMAIL_PROVIDER  — swap stub for SendGrid / nodemailer / Resend
+ * - INTEGRATION: EMAIL_PROVIDER  — wired to Brevo via brevoEmailService (enqueueEmail)
  * - INTEGRATION: SMS_PROVIDER    — swap stub for Twilio / Vonage SMS
  * - INTEGRATION: OAUTH_GOOGLE    — swap stub for Google OAuth2 flow
  * - INTEGRATION: OAUTH_APPLE     — swap stub for Sign in with Apple
@@ -27,6 +27,7 @@ import {
   generateChallenge,
   ACCESS_TOKEN_TTL_MS,
 } from "../../lib/auth.js";
+import { enqueueEmail } from "../../lib/queue.js";
 
 const router = Router();
 const isDev = process.env.NODE_ENV !== "production";
@@ -89,10 +90,7 @@ router.post("/signup", async (req, res) => {
     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
   });
 
-  // INTEGRATION: EMAIL_PROVIDER — send verification email here
-  // Example with SendGrid: sendgrid.send({ to: email, subject: "Verify your email", html: `<a href="...">Verify</a>` });
-  // Example with nodemailer: transporter.sendMail({ to: email, html: `<a href="${BASE_URL}/verify-email?token=${verifyToken}">Verify</a>` });
-  // For now, return token in dev mode only:
+  await enqueueEmail({ type: "verify", to: email.toLowerCase(), token: verifyToken });
   if (isDev) {
     console.log(`[DEV] Email verification token for ${email}: ${verifyToken}`);
   }
@@ -295,8 +293,7 @@ router.post("/forgot-password", async (req, res) => {
       expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1h
     });
 
-    // INTEGRATION: EMAIL_PROVIDER — send password reset email here
-    // Example: await sendEmail({ to: email, subject: "Reset your password", html: `...` });
+    await enqueueEmail({ type: "password_reset", to: email.toLowerCase(), token: resetToken });
     if (isDev) console.log(`[DEV] Password reset token for ${email}: ${resetToken}`);
   }
 
@@ -363,7 +360,7 @@ router.post("/resend-verification", async (req, res) => {
     type: "email_verification", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
   });
 
-  // INTEGRATION: EMAIL_PROVIDER — send verification email here
+  await enqueueEmail({ type: "verify", to: email.toLowerCase(), token: verifyToken });
   if (isDev) console.log(`[DEV] Resend verification token for ${email}: ${verifyToken}`);
 
   return res.json({

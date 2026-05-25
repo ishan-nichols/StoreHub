@@ -1,5 +1,11 @@
-// emailService.ts — minimal SendGrid/Mailgun wrapper (client-side stub)
-// NOTE: Send emails from server-side with provider API keys in secrets; do not embed keys in client bundles.
+// emailService.ts — frontend email stub
+// All email sending is handled server-side via Brevo (brevoEmailService.ts).
+// Never put BREVO_API_KEY in frontend code — it must stay server-side.
+//
+// To send transactional emails from the frontend, call the backend endpoint:
+//   POST /api/campaigns/send-email
+//   Body: { to, subject, htmlContent }
+//   The backend calls brevoEmailService.sendTransactionalEmail()
 
 export interface EmailResult {
   ok: boolean;
@@ -8,17 +14,21 @@ export interface EmailResult {
 }
 
 export async function sendEmail(to: string, subject: string, htmlBody: string): Promise<EmailResult> {
-  console.log(`[emailService] sendEmail to=${to} subject=${subject}`);
   try {
-    // In production call server endpoint which calls SendGrid/Mailgun SDK with API key.
-    // Example SendGrid (server):
-    // const sgMail = require('@sendgrid/mail');
-    // sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-    // await sgMail.send({ to, from: process.env.MAIL_FROM, subject, html: htmlBody });
-
-    return { ok: true, id: `sim-${Date.now()}` };
+    const res = await fetch("/api/campaigns/send-email", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, subject, htmlContent: htmlBody }),
+    });
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      return { ok: false, error };
+    }
+    const data = await res.json();
+    return { ok: true, id: data.messageId };
   } catch (e) {
-    console.error('[emailService] send failed', e);
+    console.error("[emailService] send failed", e);
     return { ok: false, error: (e as Error).message };
   }
 }

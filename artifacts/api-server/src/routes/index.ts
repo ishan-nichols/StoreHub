@@ -4,6 +4,7 @@ import openaiRouter from "./openai/index.js";
 import visionRouter from "./vision/index.js";
 import insightsRouter from "./insights/index.js";
 import authRouter from "./auth/index.js";
+import campaignsRouter from "./campaigns/index.js";
 import barcodeRouter from "./barcode/index.js";
 import upcRouter from "./upc/index.js";
 import squareRouter from "./square/index.js";
@@ -27,6 +28,7 @@ import mfaRouter from "./auth/mfa.js";
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/campaigns",              campaignsRouter);
 router.use("/openai",                 openaiRouter);
 router.use("/vision",                 visionRouter);
 router.use("/insights",               insightsRouter);

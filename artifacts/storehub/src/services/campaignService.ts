@@ -1,20 +1,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // campaignService.ts — full marketing campaign management
 //
-// PRODUCTION CREDENTIALS — add these as environment secrets (never commit):
+// PRODUCTION CREDENTIALS — add these to artifacts/api-server/.env (never commit):
 //
 //   SMS via Twilio:
-//     VITE_TWILIO_ACCOUNT_SID = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-//     VITE_TWILIO_AUTH_TOKEN  = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-//     VITE_TWILIO_FROM_NUMBER = "+15550001234"
+//     TWILIO_ACCOUNT_SID = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+//     TWILIO_AUTH_TOKEN  = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+//     TWILIO_FROM_NUMBER = "+15550001234"
 //
-//   Email via SendGrid:
-//     VITE_SENDGRID_API_KEY    = "SG.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-//     VITE_SENDGRID_FROM_EMAIL = "noreply@yourstore.com"
-//     VITE_SENDGRID_FROM_NAME  = "Your Store Name"
+//   Email via Brevo:
+//     BREVO_API_KEY    = "xkeysib-xxxxxxxx..."   ← get from Brevo dashboard → API Keys
+//     BREVO_FROM_EMAIL = "noreply@yourstore.com"
+//     BREVO_FROM_NAME  = "Your Store Name"
 //
-//   These plug into sendSms() and sendEmail() below. Move both calls
-//   server-side so the credentials never reach the browser.
+//   Email sends go through POST /api/campaigns/send-email on the backend,
+//   which calls brevoEmailService.sendTransactionalEmail() / sendBulkEmail().
+//   Credentials stay server-side and never reach the browser.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { listCustomers, type Customer } from "./customerService";
@@ -203,22 +204,22 @@ async function sendSms(_phone: string, _message: string): Promise<boolean> {
   return true; // simulated in dev
 }
 
-// ── Email via SendGrid ───────────────────────────────────────────────────────
-// Move this call to your backend to keep credentials server-side.
-//
-//   Endpoint: POST /api/campaigns/:id/send-email
-//   Backend calls:
-//     POST https://api.sendgrid.com/v3/mail/send
-//     Authorization: Bearer {SENDGRID_API_KEY}
-//     Headers: List-Unsubscribe: <https://yourstore.com/unsubscribe?c={contact}>
-//     Body: { from: { email: SENDGRID_FROM_EMAIL, name: SENDGRID_FROM_NAME },
-//             personalizations: [{ to: [{ email }] }],
-//             subject, content: [{ type: "text/html", value: html }] }
-async function sendEmail(_email: string, _subject: string, _html: string): Promise<boolean> {
-  // const SENDGRID_API_KEY    = import.meta.env.VITE_SENDGRID_API_KEY;
-  // const SENDGRID_FROM_EMAIL = import.meta.env.VITE_SENDGRID_FROM_EMAIL;
-  // → call your backend → SendGrid
-  return true; // simulated in dev
+// ── Email via Brevo ──────────────────────────────────────────────────────────
+// Calls POST /api/campaigns/send-email on the backend.
+// Backend calls brevoEmailService.sendTransactionalEmail() using BREVO_API_KEY.
+// Credentials stay server-side — never put BREVO_API_KEY in frontend code.
+async function sendEmail(email: string, subject: string, html: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/campaigns/send-email", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: email, subject, htmlContent: html }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 function buildEmailHtml(campaign: Campaign): string {
