@@ -11,7 +11,7 @@
  */
 
 import { execSync }           from 'child_process';
-import { cpSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { cpSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs';
 import path                   from 'path';
 import { fileURLToPath }      from 'url';
 
@@ -24,15 +24,21 @@ const ESBUILD     = path.resolve(ROOT, '../../node_modules/.pnpm/esbuild@0.27.3/
 
 const publish = process.argv.includes('--publish');
 
-// ── 1. Bundle main process ─────────────────────────────────────────────────
-console.log('[1/4] Bundling Electron main process…');
+// ── 1. Build web app (Vite) ────────────────────────────────────────────────
+// BASE_PATH='./' produces relative asset URLs (./assets/...) so the built
+// index.html works under Electron's file:// protocol without a web server.
+console.log('[1/5] Building web app with relative asset paths…');
+execSync('pnpm run build', { cwd: ROOT, stdio: 'inherit' });
+
+// ── 2. Bundle main process ─────────────────────────────────────────────────
+console.log('[2/5] Bundling Electron main process…');
 execSync(
   `${ESBUILD} electron/main.cjs --bundle --platform=node --target=node20 --external:electron --format=cjs --outfile=electron/main.bundle.cjs`,
   { cwd: ROOT, stdio: 'inherit' },
 );
 
-// ── 2. Stage clean app directory ───────────────────────────────────────────
-console.log('[2/4] Staging clean app directory…');
+// ── 3. Stage clean app directory ───────────────────────────────────────────
+console.log('[3/5] Staging clean app directory…');
 if (existsSync(STAGE)) rmSync(STAGE, { recursive: true });
 mkdirSync(STAGE, { recursive: true });
 
@@ -53,8 +59,16 @@ cpSync(ELECTRON, path.join(STAGE, 'electron'), { recursive: true });
 mkdirSync(path.join(STAGE, 'dist', 'public'), { recursive: true });
 cpSync(DIST_PUBLIC, path.join(STAGE, 'dist', 'public'), { recursive: true });
 
-// ── 3. Build electron-builder config ──────────────────────────────────────
-console.log('[3/4] Writing electron-builder config…');
+// Ensure index.html uses relative paths so file:// protocol resolves assets
+// correctly — guards against Vite being called without BASE_PATH='./'
+const indexHtmlPath = path.join(STAGE, 'dist', 'public', 'index.html');
+const indexHtml = readFileSync(indexHtmlPath, 'utf8')
+  .replace(/(src|href)="\/(assets\/)/g, '$1="./$2')
+  .replace(/(src|href)="\/(favicon\.)/g, '$1="./$2');
+writeFileSync(indexHtmlPath, indexHtml);
+
+// ── 4. Build electron-builder config ──────────────────────────────────────
+console.log('[4/5] Writing electron-builder config…');
 
 // Read the installed electron version from the pnpm store
 const electronPkg = JSON.parse(
@@ -113,8 +127,8 @@ const builderConfig = {
 const configPath = path.join(ROOT, 'dist', 'electron-builder-gen.json');
 writeFileSync(configPath, JSON.stringify(builderConfig, null, 2));
 
-// ── 4. Package + zip ──────────────────────────────────────────────────────
-console.log('[4/4] Packaging and zipping…');
+// ── 5. Package + zip ──────────────────────────────────────────────────────
+console.log('[5/5] Packaging and zipping…');
 
 // Step 4a: Run electron-builder in --dir mode (creates win-unpacked, no Wine needed)
 const dirConfig = { ...builderConfig, win: { target: [{ target: 'dir', arch: ['x64'] }] } };
