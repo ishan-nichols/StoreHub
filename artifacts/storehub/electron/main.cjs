@@ -102,11 +102,9 @@ function createWindow() {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     mainWindow.loadURL('app://localhost/index.html');
-    // F12 opens DevTools for debugging production builds
-    mainWindow.webContents.on('before-input-event', (_e, input) => {
-      if (input.type === 'keyDown' && input.key === 'F12') {
-        mainWindow.webContents.openDevTools({ mode: 'detach' });
-      }
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+    mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+      dialog.showErrorBox('Load failed', `${desc} (${code})\n\n${url}`);
     });
   }
 
