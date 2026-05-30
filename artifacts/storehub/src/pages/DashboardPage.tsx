@@ -15,7 +15,8 @@ import LowMarginAlerts from "../components/LowMarginAlerts";
 import SmartTipsWidget from "../components/SmartTipsWidget";
 import RealProfitPanel from "../components/RealProfitPanel";
 import VoiceButton from "../components/VoiceButton";
-import { getDashboardSummary, getProducts, API_BASE_URL, getMonthCloseRecords } from "../services/dataService";
+import { getDashboardSummary, getProducts, API_BASE_URL, getMonthCloseRecords, getSales } from "../services/dataService";
+import { getRecentShifts } from "../services/cashDrawerService";
 import type { DashboardSummary, MonthCloseRecord } from "../schemas";
 import { formatCurrency, formatDateTime } from "../utils";
 
@@ -102,15 +103,45 @@ export default function DashboardPage() {
   const [reportGenerating, setReportGenerating] = useState(false);
   const [monthCloseRecords, setMonthCloseRecords] = useState<MonthCloseRecord[]>([]);
   const [checklistDismissed, setChecklistDismissed] = useState(() => localStorage.getItem(CHECKLIST_KEY) === "1");
+  const [shiftAlert, setShiftAlert] = useState<{ variance: number; date: string } | null>(null);
   const reportAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!profile) return;
-    Promise.all([getDashboardSummary(profile), getProducts(), getMonthCloseRecords()]).then(([dashboardSummary, products, closedMonths]) => {
+    Promise.all([getDashboardSummary(profile), getProducts(), getMonthCloseRecords(), getSales()]).then(([dashboardSummary, products, closedMonths, sales]) => {
       setSummary(dashboardSummary);
       setTotalProducts(products.length);
       setMonthCloseRecords(closedMonths);
       setLoading(false);
+
+      // Check if the most recent closed shift has a cash variance
+      const recentShifts = getRecentShifts(5);
+      const lastClosed = recentShifts.find(s => s.closedAt);
+      if (lastClosed) {
+        const start = new Date(lastClosed.openedAt);
+        const end = new Date(lastClosed.closedAt!);
+        const shiftSales = sales.filter(s => {
+          const d = new Date(s.createdAt);
+          return d >= start && d <= end;
+        });
+        const cashSalesFromMethod = shiftSales
+          .filter(s => s.paymentMethod?.toLowerCase() === 'cash')
+          .reduce((sum, s) => sum + s.total, 0);
+        const anyMethodSet = shiftSales.some(s => s.paymentMethod && s.paymentMethod !== '');
+        const totalShiftSales = shiftSales.reduce((sum, s) => sum + s.total, 0);
+        const cashIn = lastClosed.cashIn > 0 ? lastClosed.cashIn : anyMethodSet ? cashSalesFromMethod : totalShiftSales;
+        const expectedCash = lastClosed.openingFloat + cashIn - lastClosed.cashOut;
+        const actualCash = lastClosed.countedClose != null ? lastClosed.countedClose : expectedCash;
+        let variance: number;
+        if (lastClosed.variance != null) {
+          variance = lastClosed.variance !== 0 || expectedCash === 0 ? lastClosed.variance : actualCash - expectedCash;
+        } else {
+          variance = actualCash - expectedCash;
+        }
+        if (Math.abs(variance) >= 0.01) {
+          setShiftAlert({ variance, date: lastClosed.openedAt });
+        }
+      }
 
       const cached = getReportCache();
       if (cached) setReport(cached);
@@ -267,6 +298,36 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
       <RealProfitPanel />
+
+      {shiftAlert && (
+        <section className={`rounded-[32px] p-6 shadow-xl shadow-stone-900/10 md:px-7 ${shiftAlert.variance > 0 ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-200'}`}>
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-4">
+              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${shiftAlert.variance > 0 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                <AlertTriangle size={18} />
+              </div>
+              <div>
+                <p className={`text-xs font-semibold uppercase tracking-[0.24em] ${shiftAlert.variance > 0 ? 'text-amber-700' : 'text-red-700'}`}>
+                  Cash {shiftAlert.variance > 0 ? 'Overage' : 'Shortage'} — Last Shift
+                </p>
+                <h2 className="mt-1 text-xl font-semibold tracking-[-0.03em] text-stone-900">
+                  {shiftAlert.variance > 0 ? '+' : '-'}${Math.abs(shiftAlert.variance).toFixed(2)} variance detected
+                </h2>
+                <p className="mt-1 text-sm text-stone-700">
+                  Shift opened {new Date(shiftAlert.date).toLocaleDateString()} — the counted cash did not match the expected drawer amount.
+                </p>
+              </div>
+            </div>
+            <a
+              href="/reports?tab=shift"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-stone-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-stone-800 whitespace-nowrap"
+            >
+              View shift report
+              <ArrowRight size={16} />
+            </a>
+          </div>
+        </section>
+      )}
 
       <section className="glass-panel premium-grid relative overflow-hidden rounded-[36px] px-6 py-7 md:px-8 md:py-8">
         <div className="absolute right-0 top-0 h-44 w-44 rounded-full bg-amber-200/40 blur-3xl" />
