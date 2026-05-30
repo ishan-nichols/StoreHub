@@ -89,15 +89,13 @@ export function closeShift(shiftId: string, countedAmount: number): CashShift {
 }
 
 export function getShift(shiftId: string): CashShift | null {
-  const shifts = getAllShifts();
-  const shift = shifts.find(s => s.id === shiftId);
-  if (shift) return shift;
-
-  // Check current shift
+  // Prefer the live currentShift for the active (unclosed) shift — it has the
+  // most up-to-date cashIn/cashOut values from addCashIn/addCashOut.
   const current = getCurrentShift();
   if (current && current.id === shiftId) return current;
 
-  return null;
+  const shifts = getAllShifts();
+  return shifts.find(s => s.id === shiftId) ?? null;
 }
 
 // ─── Cash In/Out Tracking ─────────────────────────────────────────────────────
@@ -110,6 +108,7 @@ export function addCashIn(amount: number, notes?: string): CashShift {
 
   shift.cashIn += amount;
   setCurrentShift(shift);
+  saveShift(shift);
   return shift;
 }
 
@@ -121,6 +120,7 @@ export function addCashOut(amount: number, notes?: string): CashShift {
 
   shift.cashOut += amount;
   setCurrentShift(shift);
+  saveShift(shift);
   return shift;
 }
 

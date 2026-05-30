@@ -157,11 +157,16 @@ function buildShiftReportFromCashShift(
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5);
 
-  const cashIn = shiftSales
+  // Use the tracked shift.cashIn (kept current by addCashIn on every cash sale)
+  // as the authoritative source for the drawer expected-cash calculation.
+  // Fall back to summing sales by payment method only when cashIn was never tracked.
+  const cashInFromSales = shiftSales
     .filter(s => s.paymentMethod?.toLowerCase() === 'cash')
     .reduce((sum, s) => sum + s.total, 0);
+  const cashIn = shift.cashIn > 0 ? shift.cashIn : cashInFromSales;
   const expectedCash = shift.openingFloat + cashIn - shift.cashOut;
-  const actualCash = shift.countedClose ?? expectedCash;
+  // countedClose of 0 is a real value (user counted $0), so use ?? not ||
+  const actualCash = shift.countedClose != null ? shift.countedClose : expectedCash;
   const difference = actualCash - expectedCash;
   const taxCollected = shiftSales.reduce((sum, s) => sum + s.tax, 0);
 
