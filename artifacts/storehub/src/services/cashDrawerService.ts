@@ -145,9 +145,17 @@ export function getShiftReport(shiftId: string): CashShiftReport | null {
   if (!shift) return null;
 
   const expectedCash = shift.openingFloat + shift.cashIn - shift.cashOut;
-  const actualCash = shift.countedClose ?? expectedCash;
-  const variance = actualCash - expectedCash;
-  const isBalanced = Math.abs(variance) < 0.01; // Within 1 cent
+  const actualCash = shift.countedClose != null ? shift.countedClose : expectedCash;
+
+  // For closed shifts use the variance stored by closeShift — it was calculated
+  // from the live currentShift (correct cashIn) and is always authoritative.
+  // Fall back to recalculating only for open/live shifts.
+  const variance =
+    shift.closedAt && shift.variance != null
+      ? shift.variance
+      : actualCash - expectedCash;
+
+  const isBalanced = Math.abs(variance) < 0.01;
 
   let discrepancyNote: string | undefined;
   if (!isBalanced) {
