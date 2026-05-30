@@ -118,12 +118,15 @@ function buildShiftReportFromCashShift(
   });
 
   const cashSales = shiftSales
-    .filter(s => s.paymentMethod === 'cash')
+    .filter(s => s.paymentMethod?.toLowerCase() === 'cash')
     .reduce((sum, s) => sum + s.total, 0);
   const cardSales = shiftSales
-    .filter(s => s.paymentMethod === 'card_reader')
+    .filter(s => {
+      const m = s.paymentMethod?.toLowerCase() ?? '';
+      return m === 'card' || m === 'card_reader' || m === 'credit_card' || m === 'debit_card';
+    })
     .reduce((sum, s) => sum + s.total, 0);
-  const totalSales = cashSales + cardSales;
+  const totalSales = shiftSales.reduce((sum, s) => sum + s.total, 0);
   const transactionCount = shiftSales.length;
   const avgTransactionValue = transactionCount > 0 ? totalSales / transactionCount : 0;
 
@@ -155,7 +158,7 @@ function buildShiftReportFromCashShift(
     .slice(0, 5);
 
   const cashIn = shiftSales
-    .filter(s => s.paymentMethod === 'cash')
+    .filter(s => s.paymentMethod?.toLowerCase() === 'cash')
     .reduce((sum, s) => sum + s.total, 0);
   const expectedCash = shift.openingFloat + cashIn - shift.cashOut;
   const actualCash = shift.countedClose ?? expectedCash;
@@ -164,8 +167,8 @@ function buildShiftReportFromCashShift(
 
   return {
     shiftDate: new Date(shift.openedAt).toLocaleDateString(),
-    openTime: new Date(shift.openedAt).toLocaleTimeString(),
-    closeTime: shift.closedAt ? new Date(shift.closedAt).toLocaleTimeString() : 'Ongoing',
+    openTime: new Date(shift.openedAt).toLocaleString(),
+    closeTime: shift.closedAt ? new Date(shift.closedAt).toLocaleString() : 'Ongoing',
     duration: shift.closedAt ? `${Math.round((new Date(shift.closedAt).getTime() - start.getTime()) / 3600000 * 10) / 10} hours` : 'Ongoing',
     openingFloat: shift.openingFloat,
     cashSales,
