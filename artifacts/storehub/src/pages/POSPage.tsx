@@ -3,6 +3,7 @@ import { Minus, Plus, Printer, Search, ShoppingCart, Trash2, X, Maximize2, Pause
 import CurrencyInput from "../components/CurrencyInput";
 import { useApp } from "../contexts/useApp";
 import { createSale, getProducts, API_BASE_URL } from "../services/dataService";
+import { addCashIn, getCurrentShift } from "../services/cashDrawerService";
 import type { CartItem, Product } from "../schemas";
 import { formatCurrency } from "../utils";
 
@@ -597,6 +598,7 @@ function RetailPOSPage() {
   const [fullscreenMode, setFullscreenMode] = useState(
     () => localStorage.getItem("storehub_pos_fullscreen") === "true"
   );
+  const [paymentMethod, setPaymentMethod] = useState<"Cash" | "Card" | "Other">("Cash");
   const [discount, setDiscount] = useState<{ type: "percent" | "amount"; value: number } | null>(null);
   const [showDiscountInput, setShowDiscountInput] = useState(false);
   const [heldCarts, setHeldCarts] = useState<{ id: string; items: CartItem[]; savedAt: string }[]>([]);
@@ -720,9 +722,14 @@ function RetailPOSPage() {
       total,
       amountPaid,
       change: amountPaid - total,
+      paymentMethod,
       note: "",
       receiptNumber: "",
     });
+
+    if (paymentMethod === "Cash" && getCurrentShift()) {
+      try { addCashIn(total); } catch { /* no active shift, ignore */ }
+    }
 
     setReceipt({
       receiptNumber: sale.receiptNumber,
@@ -736,6 +743,7 @@ function RetailPOSPage() {
     setCart([]);
     setShowCheckout(false);
     setAmountPaid(0);
+    setPaymentMethod("Cash");
     await load();
   }
 
@@ -1217,6 +1225,26 @@ function RetailPOSPage() {
                   {discount && <LineItem label={`Discount${discount.type === "percent" ? ` (${discount.value}%)` : ""}`} value={`-${formatCurrency(discountAmount, currencySymbol)}`} />}
                   <LineItem label={`Tax${taxRate ? ` (${taxRate}%)` : ""}`} value={formatCurrency(tax, currencySymbol)} />
                   <LineItem label="Total" value={formatCurrency(total, currencySymbol)} strong />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-stone-600">Payment method</label>
+                <div className="flex gap-2">
+                  {(["Cash", "Card", "Other"] as const).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setPaymentMethod(method)}
+                      className={`flex-1 rounded-2xl py-2.5 text-sm font-medium transition ${
+                        paymentMethod === method
+                          ? "bg-stone-950 text-white"
+                          : "border border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
+                      }`}
+                    >
+                      {method}
+                    </button>
+                  ))}
                 </div>
               </div>
 
