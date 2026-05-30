@@ -157,24 +157,33 @@ function buildShiftReportFromCashShift(
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5);
 
-  // Priority order for expected-cash:
-  //   1. shift.cashIn > 0  — tracked live by addCashIn on every cash sale (most reliable)
-  //   2. sum of sales whose paymentMethod is cash — fallback when tracking not available
-  const cashInFromSales = shiftSales
+  // Determine the cash that came in during this shift.
+  // Priority:
+  //   1. shift.cashIn if > 0 (tracked live by addCashIn on every cash sale)
+  //   2. Sum of sales whose paymentMethod is 'cash' (case-insensitive)
+  //   3. Total of ALL sales in the shift if no sale has a paymentMethod set
+  //      (old data before the paymentMethod fix — assume all were cash)
+  const cashSalesFromMethod = shiftSales
     .filter(s => s.paymentMethod?.toLowerCase() === 'cash')
     .reduce((sum, s) => sum + s.total, 0);
-  const cashIn = shift.cashIn > 0 ? shift.cashIn : cashInFromSales;
+  const anyMethodSet = shiftSales.some(s => s.paymentMethod && s.paymentMethod !== '');
+  const cashIn =
+    shift.cashIn > 0
+      ? shift.cashIn
+      : anyMethodSet
+        ? cashSalesFromMethod
+        : totalSales;  // no payment method info at all → assume all cash
+
   const expectedCash = shift.openingFloat + cashIn - shift.cashOut;
-  // countedClose of 0 is a real value (user counted $0), so use != null not ?? or ||
+  // countedClose=0 is a real value (user counted $0), so use != null not ?? or ||
   const actualCash = shift.countedClose != null ? shift.countedClose : expectedCash;
 
-  // For closed shifts: prefer the variance stored by closeShift (computed from the
-  // live currentShift which always has the correct cashIn).  Only fall back to the
-  // recalculated value when the stored variance is explicitly 0 AND we have positive
-  // cashIn evidence (which would mean the stored variance is stale/wrong).
+  // For closed shifts: prefer shift.variance (stored at close time from the live
+  // currentShift which had the correct cashIn).  Fall back to recalculation only
+  // when the stored variance is 0 but we now know expectedCash > 0.
   const calculatedDifference = actualCash - expectedCash;
   const difference =
-    shift.closedAt && shift.variance != null && (shift.variance !== 0 || calculatedDifference === 0)
+    shift.closedAt && shift.variance != null && (shift.variance !== 0 || expectedCash === 0)
       ? shift.variance
       : calculatedDifference;
   const taxCollected = shiftSales.reduce((sum, s) => sum + s.tax, 0);
