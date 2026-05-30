@@ -380,9 +380,9 @@ export default function CashManagementPage() {
                       <td className="py-3">
                         {row.shift.closedAt ? (
                           <div className="flex items-center gap-2">
-                            <CheckCircle className={`w-4 h-4 ${row.isBalanced ? "text-green-600" : "text-red-600"}`} />
-                            <span className={row.isBalanced ? "text-green-600" : "text-red-600"}>
-                              {row.isBalanced ? "Balanced" : "Shortage"}
+                            <CheckCircle className={`w-4 h-4 ${row.isBalanced ? "text-green-600" : row.variance > 0 ? "text-amber-600" : "text-red-600"}`} />
+                            <span className={row.isBalanced ? "text-green-600" : row.variance > 0 ? "text-amber-600" : "text-red-600"}>
+                              {row.isBalanced ? "Balanced" : row.variance > 0 ? "Overage" : "Shortage"}
                             </span>
                           </div>
                         ) : (
